@@ -75,7 +75,8 @@ export class InventoryRenderer {
   }
 
   render(ctx: CanvasRenderingContext2D, screenWidth: number, screenHeight: number, inventory: Inventory): void {
-    if (!this.showInventory) return;
+    // Game.ts controls visibility via showPlayerInventory, renderer flag is kept for quick hint logic but not gating main render
+    // if (!this.showInventory) return; // removed to fix inventory not showing - Game is source of truth
 
     ctx.save();
 

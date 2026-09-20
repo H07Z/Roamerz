@@ -333,6 +333,7 @@ export class Game {
         if (this.player) {
           console.log(`[Game] Player Inventory: ${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()} ${this.player.getInventoryDebugString()}`);
         }
+        this.inventoryRenderer.setShowInventory(this.showPlayerInventory);
 
         // Phase 15 Farming System init
         this.farmingSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
@@ -798,10 +799,13 @@ export class Game {
 
     this.showPlayerInventory = false;
     this.inventorySortMode = SortMode.CATEGORY;
+    this.inventoryRenderer.setShowInventory(false);
     this.showFarming = true;
     this.showAnimals = true;
     this.showCrafting = false;
+    this.craftingRenderer.setShowCrafting(false);
     this.showCooking = false;
+    this.cookingRenderer.setShowCooking(false);
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -1079,6 +1083,7 @@ export class Game {
     if (this.showCrafting) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift'))) {
         this.showCrafting = false;
+        this.craftingRenderer.setShowCrafting(false);
         console.log('[Crafting] Closed crafting UI');
         return;
       }
@@ -1160,6 +1165,7 @@ export class Game {
     if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
         this.showCrafting = !this.showCrafting;
+        this.craftingRenderer.setShowCrafting(this.showCrafting);
         if (this.showCrafting) {
           console.log('[Crafting] Opened crafting UI');
           // Reset selected index
@@ -1181,6 +1187,7 @@ export class Game {
     if (this.showCooking) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift'))) {
         this.showCooking = false;
+        this.cookingRenderer.setShowCooking(false);
         console.log('[Cooking] Closed cooking UI');
         return;
       }
@@ -1277,6 +1284,7 @@ export class Game {
     if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting) {
       if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
         this.showCooking = !this.showCooking;
+        this.cookingRenderer.setShowCooking(this.showCooking);
         if (this.showCooking) {
           console.log('[Cooking] Opened cooking UI');
           this.cookingRenderer.setSelectedIndex(0);
@@ -1299,6 +1307,7 @@ export class Game {
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
         this.showPlayerInventory = false;
+        this.inventoryRenderer.setShowInventory(false);
         console.log('[Inventory] Closed inventory UI');
         return;
       }
@@ -1354,6 +1363,7 @@ export class Game {
           return;
         } else {
           this.showPlayerInventory = true;
+          this.inventoryRenderer.setShowInventory(true);
           console.log('[Inventory] Opened inventory UI');
           return;
         }

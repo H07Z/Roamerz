@@ -99,7 +99,8 @@ export class CookingRenderer {
   }
 
   render(ctx: CanvasRenderingContext2D, screenWidth: number, screenHeight: number, cookingSystem: CookingSystem, inventory: Inventory): void {
-    if (!this.showCooking) return;
+    // Game.ts is source of truth, don't gate on internal flag to avoid inventory-like bug
+    // if (!this.showCooking) return;
 
     const filteredRecipes = this.getFilteredRecipes(cookingSystem, inventory);
     if (this.selectedIndex >= filteredRecipes.length) {

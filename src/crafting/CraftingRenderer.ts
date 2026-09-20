@@ -105,7 +105,8 @@ export class CraftingRenderer {
   }
 
   render(ctx: CanvasRenderingContext2D, screenWidth: number, screenHeight: number, craftingSystem: CraftingSystem, inventory: Inventory): void {
-    if (!this.showCrafting) return;
+    // Game.ts is source of truth for visibility, keep internal flag for quick hint but don't gate main render
+    // if (!this.showCrafting) return;
 
     const filteredRecipes = this.getFilteredRecipes(craftingSystem, inventory);
     if (this.selectedIndex >= filteredRecipes.length) {
