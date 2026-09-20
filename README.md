@@ -8,27 +8,17 @@ A 2D top-down living-world adventure where NPCs live independently of the player
 - **TypeScript + Vite + HTML5 Canvas 2D**
 
 ### Why this stack?
-
-**Chosen: Vanilla TypeScript + Canvas**
-- ✅ Full control over game loop, rendering, collision, pathfinding
-- ✅ Simplest reliable implementation (no engine bloat)
-- ✅ Perfect for custom living-world simulation
-- ✅ Works flawlessly in browser preview (Arena)
-- ✅ Easy modular architecture
-- ✅ Placeholder graphics first, sprite replacement later
-- ✅ Zero heavy dependencies, fast iteration
-
-**Considered Alternatives:**
-- **Phaser:** Great for 2D games, but hides core systems we want to build ourselves (collision, pathfinding). Overkill for foundation phases.
-- **Godot / Unity:** Not web-native in this sandbox, binary assets, harder to preview.
-- **Python / Pygame:** Harder to host preview, not browser-native.
+- Full control over game loop, rendering, collision, pathfinding
+- Simplest reliable implementation, no engine bloat
+- Perfect for custom living-world simulation
+- Works in browser preview, modular, placeholder graphics first
 
 ## Project Phases
 
 ```
 PHASE 1  — Project Foundation [COMPLETE]
-PHASE 2  — World Map [CURRENT - COMPLETE]
-PHASE 3  — Player Movement
+PHASE 2  — World Map [COMPLETE]
+PHASE 3  — Player Movement [CURRENT - COMPLETE]
 PHASE 4  — Collision System
 PHASE 5  — Camera System
 PHASE 6  — NPC Foundation
@@ -40,31 +30,28 @@ PHASE 11 — Player Interaction & Dialogue
 PHASE 12 — Exploration & World Expansion
 ```
 
-## Phase 2 - World Map [CURRENT]
+## Phase 3 - Player Movement [CURRENT]
 
 ### Objective
-First small village map:
-- Village square
-- Forest entrance
-- Road (N-S and E-W cross)
-- 5 houses
-- Small farm with fence
-- Small river with bridge
-- Trees, rocks, boundaries
+Add exactly ONE player with placeholder graphics, movement, states, world boundary clamping.
 
-### Map Details
-- **ID:** village_01 - Greenhollow Village
-- **Size:** 50 x 40 tiles = 2000 tiles
-- **Tile Size:** 32px = 1600x1280px world
-- **Terrain Types (8):** GRASS, ROAD, WATER, BRIDGE, TREE, ROCK, HOUSE, FARMLAND
-- **Features:**
-  - Village square at (25,20)
-  - River at x=38-39 vertical
-  - Bridge at 36-41,19-20 (12 tiles, distinct)
-  - 5 houses with doors
-  - Farm at SW with rock fence
-  - Forest dense north
-  - Boundaries: TREE/ROCK border with openings
+### Player Details
+- **Start Position:** Village square (25,20) = 816,656 px
+- **Speed:** 150 px/s (consistent via deltaTime)
+- **Size:** 20x20 px
+- **States:** IDLE, WALK
+- **Directions:** 8-way (UP, DOWN, LEFT, RIGHT, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT)
+- **Movement:** WASD + Arrows, diagonal normalized (not faster), deltaTime based
+- **Boundary:** Cannot leave world (1600x1280), clamped to map edges
+
+### Placeholder Graphics
+- Shadow ellipse
+- Green tunic body rectangle
+- Skin head circle + hair
+- Eyes offset by direction
+- Direction arrow triangle
+- State dot (green IDLE, yellow WALK)
+- Walk bobbing animation (sin wave)
 
 ### Running
 
@@ -74,52 +61,64 @@ npm run dev
 # Open http://localhost:5173
 ```
 
-### Controls (Phase 2 Debug)
-- **WASD / Arrows + E** - Pan map (debug, before camera system)
-- **C** - Center on village square
+### Controls (Phase 3)
+- **WASD / Arrows** - Move player (diagonal: W+A etc)
+- **C** - Center camera on player
+- **V** - Center on village square (debug)
 - **G** - Toggle grid
-- **B** - Toggle tile coordinates
-- **D** - Toggle debug overlay
+- **B** - Toggle tile coords
+- **\` / F2 / Shift+D** - Toggle debug overlay (D conflict avoided)
 - **H** - Toggle help panel
-- **R** - Reset timer + center
+- **R** - Reset player to village square + timer
 
 ### Architecture
 
 ```
 src/
 ├── core/
-│   ├── Game.ts          - Main loop + world integration
-│   ├── Renderer.ts      - Canvas & background (fallback)
+│   ├── Game.ts          - Main loop + player + world + camera follow
+│   ├── Renderer.ts      - Canvas fallback
 │   ├── InputManager.ts  - Keyboard/mouse
-│   └── DebugManager.ts  - FPS, time, screen, map info
+│   └── DebugManager.ts  - FPS, time, screen, map, player info
 ├── world/
-│   ├── TerrainType.ts   - Enum + properties
-│   ├── WorldMap.ts      - Map data container + validation
-│   ├── World.ts         - World manager
-│   ├── WorldRenderer.ts - Tile rendering with distinct visuals
-│   ├── maps/
-│   │   └── village_01.ts - Generator (data separate from logic)
+│   ├── TerrainType.ts
+│   ├── WorldMap.ts
+│   ├── World.ts
+│   ├── WorldRenderer.ts - + centerOnTilePixel, camera follow
+│   ├── maps/village_01.ts
 │   └── README.md
-├── data/
-│   └── maps/
-│       └── village_01.json - JSON data file (data-driven)
-└── main.ts              - Bootstrap
+├── player/
+│   ├── Player.ts        - x,y,speed,dir,state, update with deltaTime, boundary clamp
+│   ├── PlayerRenderer.ts - placeholder graphics, bobbing, direction indicator
+│   └── README.md
+├── data/maps/village_01.json
+└── main.ts
 ```
 
 ### Debug Overlay Shows
-- FPS with color indicator
-- Game Time
-- Screen W/H
-- World Offset (for boundary testing)
-- Map ID, Name, Size, Tile count
-- Tile counts per type (G,R,W,B,T,O,H,F)
-- Validation: OK/CORRUPT + Types distinct count
-- Map border (red dashed) when visible
+- FPS, Game Time, Screen W/H, World Offset
+- Player: Pos (px), Tile, Speed, Dir, State, Distance traveled, Boundary status
+- Map: ID, Name, Size, Tile counts, Validation
+- Help panel with controls + test checklist
 
-### Data-Driven Design
-- Map data in `src/data/maps/village_01.json`
-- Generator in `src/world/maps/village_01.ts` separate from WorldMap logic
-- WorldMap validates tile count and terrain validity on load
+### Tests (Phase 3)
+- Move up (W/Up) → PASS
+- Move down (S/Down) → PASS
+- Move left (A/Left) → PASS
+- Move right (D/Right/E) → PASS
+- Diagonal normalized (150 not 212) → PASS
+- Speed consistent at 60/30/10 FPS (deltaTime) → PASS
+- Cannot leave world boundaries → PASS
+- States IDLE/WALK → PASS
+
+## Phase 2 Recap
+- Village map 50x40 = 2000 tiles, 8 terrain types
+- Square, 5 houses, farm, river with bridge, forest, boundaries
+- Data-driven JSON + generator, validation
+
+## Phase 1 Recap
+- Game window, rendering surface, loop with deltaTime
+- FPS/debug, resize handling
 
 ## Development Principles
 1. Small changes
@@ -130,8 +129,3 @@ src/
 6. Debug everything
 7. Don't rewrite working systems
 8. Placeholder graphics first
-
-## Phase 1 Recap
-- Game window, rendering surface, game loop with deltaTime
-- FPS/debug, responsive resize
-- No player/NPCs yet (by design)

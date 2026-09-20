@@ -47,6 +47,11 @@ export class WorldRenderer {
     this.offsetY = worldPixelY - screenHeight / 2;
   }
 
+  centerOnTilePixel(worldPixelX: number, worldPixelY: number, screenWidth: number, screenHeight: number): void {
+    this.offsetX = worldPixelX - screenWidth / 2;
+    this.offsetY = worldPixelY - screenHeight / 2;
+  }
+
   // Clamp offset to map boundaries
   clampToMap(map: WorldMap, screenWidth: number, screenHeight: number): void {
     const mapPixelWidth = map.width * this.tileSize;
