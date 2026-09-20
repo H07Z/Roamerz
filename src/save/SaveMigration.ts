@@ -47,6 +47,10 @@ export function migrateSaveFile(saveFile: any): SaveFile {
         migratedFile = migrateToV18(migratedFile);
         migrations.push(`Migrated to v18 (Phase 16.3 Cooking System)`);
         break;
+      case 19:
+        migratedFile = migrateToV19(migratedFile);
+        migrations.push(`Migrated to v19 (Phase 16.4 Weather System)`);
+        break;
       default:
         // Generic migration: ensure defaults for unknown future version
         migratedFile = migrateGeneric(migratedFile, nextVersion);
@@ -392,8 +396,46 @@ function migrateToV18(oldSave: any): any {
   };
 }
 
+function migrateToV19(oldSave: any): any {
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+  const oldWeather = oldSave.world?.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, totalChanges: 0, version: 1 };
+
+  const newWeather = {
+    current: (oldWeather.current ?? 'SUNNY').toString().toLowerCase(),
+    intensity: typeof oldWeather.intensity === 'number' ? oldWeather.intensity : 0,
+    nextChange: typeof oldWeather.nextChange === 'number' ? oldWeather.nextChange : 0,
+    totalChanges: typeof oldWeather.totalChanges === 'number' ? oldWeather.totalChanges : 0,
+    version: 1
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 19,
+    gameVersion: oldSave.gameVersion ?? '0.19.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      cooking: oldSave.player?.cooking ?? {},
+      crafting: oldSave.player?.crafting ?? {}
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      weather: newWeather,
+      cooking: oldSave.world?.cooking ?? { recipesUnlocked: [], totalCooked: 0, cookedCounts: {}, version: 1 },
+      crafting: oldSave.world?.crafting ?? { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
+      animals: oldSave.world?.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
+      farming: oldSave.world?.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} }
+    },
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 19, gameVersion: oldSave.gameVersion ?? '0.19.0' }
+  };
+}
+
 // For future phases:
-// function migrateToV19(saveFile: any): any { ... }
+// function migrateToV20(saveFile: any): any { ... }
 
 export function getMigrationPath(fromVersion: number, toVersion: number = SAVE_VERSION): number[] {
   const path: number[] = [];

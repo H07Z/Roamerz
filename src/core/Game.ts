@@ -1,5 +1,5 @@
 /**
- * Game - Phase 16.3 Cooking System
+ * Game - Phase 16.4 Weather System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
@@ -72,6 +72,9 @@ import { CookingDatabase } from '../cooking/CookingDatabase';
 import { CookingSystem } from '../cooking/CookingSystem';
 import { CookingRenderer } from '../cooking/CookingRenderer';
 import { CookingCategory } from '../cooking/CookingRecipe';
+import { WeatherDatabase } from '../weather/WeatherDatabase';
+import { WeatherSystem } from '../weather/WeatherSystem';
+import { WeatherRenderer } from '../weather/WeatherRenderer';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -147,6 +150,13 @@ export class Game {
   private cookingRenderer: CookingRenderer;
   private showCooking: boolean = false;
   private showCookingDebug: boolean = true;
+
+  // Phase 16.4 Weather System
+  private weatherDatabase: WeatherDatabase;
+  private weatherSystem: WeatherSystem;
+  private weatherRenderer: WeatherRenderer;
+  private showWeather: boolean = true;
+  private showWeatherDebug: boolean = true;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -228,6 +238,9 @@ export class Game {
     this.cookingDatabase = CookingDatabase.getInstance();
     this.cookingSystem = new CookingSystem(this.cookingDatabase);
     this.cookingRenderer = new CookingRenderer(this.itemDatabase, this.cookingDatabase);
+    this.weatherDatabase = WeatherDatabase.getInstance();
+    this.weatherSystem = new WeatherSystem(this.weatherDatabase);
+    this.weatherRenderer = new WeatherRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
@@ -383,6 +396,18 @@ export class Game {
         console.log(`[Game] CookingSystem: ${this.cookingSystem.getDebugString()}`);
         this.cookingRenderer.setShowCooking(this.showCooking);
 
+        // Phase 16.4 Weather System init
+        this.weatherSystem.initialize(this.timeManager.getTotalSeconds());
+        console.log(`[Game] WeatherDatabase: ${this.weatherDatabase.getCount()} weathers: ${this.weatherDatabase.getDebugString()}`);
+        const weatherValidation = this.weatherDatabase.validate();
+        if (!weatherValidation.valid) {
+          console.warn('[Game] WeatherDatabase validation errors:', weatherValidation.errors);
+        } else {
+          console.log('[Game] WeatherDatabase validation PASS');
+        }
+        console.log(`[Game] WeatherSystem: ${this.weatherSystem.getDebugString()}`);
+        this.weatherRenderer.setShowWeather(this.showWeather);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -399,7 +424,8 @@ export class Game {
         console.log(`[Game] Phase 16.1: Animals System - data-driven livestock, feed/pet/produce/wander, hunger/happiness, persistence`);
         console.log(`[Game] Phase 16.2: Crafting System - data-driven recipes, ingredients consumption, result add, categories, persistence`);
         console.log(`[Game] Phase 16.3: Cooking System - data-driven recipes, ingredients consumption, stations, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 16.4: Weather System - data-driven weathers, transitions, visuals, farming auto-water, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -481,6 +507,7 @@ export class Game {
     const animalSave = this.animalSystem.getSaveData();
     const craftingSave = this.craftingSystem.getSaveData();
     const cookingSave = this.cookingSystem.getSaveData();
+    const weatherSave = this.weatherSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -500,7 +527,7 @@ export class Game {
       animals: animalSave,
       crafting: craftingSave,
       cooking: cookingSave,
-      weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
+      weather: weatherSave,
       economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: {},
       events: {},
@@ -611,6 +638,14 @@ export class Game {
         console.log(`[Game] Cooking loaded: ${this.cookingSystem.getDebugString()}`);
       }
 
+      if ((saveFile.world as any).weather) {
+        this.weatherSystem.loadSaveData((saveFile.world as any).weather);
+        console.log(`[Game] Weather loaded: ${this.weatherSystem.getDebugString()}`);
+      } else if (saveFile.world.weather) {
+        this.weatherSystem.loadSaveData(saveFile.world.weather);
+        console.log(`[Game] Weather loaded: ${this.weatherSystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -658,7 +693,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()} weather ${this.weatherSystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -779,6 +814,8 @@ export class Game {
     this.animalSystem.clear();
     this.craftingSystem.clear();
     this.cookingSystem.clear();
+    this.weatherSystem.clear();
+    this.weatherSystem.initialize(this.timeManager.getTotalSeconds());
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
     const villageMapForAnimals = this.world.getMap('village_01') ?? this.world.getCurrentMap();
@@ -806,6 +843,8 @@ export class Game {
     this.craftingRenderer.setShowCrafting(false);
     this.showCooking = false;
     this.cookingRenderer.setShowCooking(false);
+    this.showWeather = true;
+    this.weatherRenderer.setShowWeather(true);
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -1296,6 +1335,46 @@ export class Game {
     }
   }
 
+  // ==================== PHASE 16.4 WEATHER INPUT ====================
+
+  private handleWeatherInput(): void {
+    // Weather overlay is non-blocking visual, Shift+W toggle overlay, Ctrl+Shift+W cycle weather
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    // Don't block if inventory/crafting/cooking open? Allow toggle even when those open? For simplicity, allow only when no modal
+    if (isDialogueOpen || isSaveUIOpen) return;
+
+    if (this.input.isKeyJustPressed('w') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+      this.showWeather = !this.showWeather;
+      this.weatherRenderer.setShowWeather(this.showWeather);
+      console.log(`[Weather] Overlay: ${this.showWeather ? 'ON' : 'OFF'}`);
+      this.saveRenderer.showMessage(`${this.showWeather ? '🌦️ Weather ON' : '🌦️ Weather OFF'} - ${this.weatherSystem.getCurrentWeather()?.name ?? 'unknown'}`, '#8af', 2);
+      return;
+    }
+
+    if (this.input.isKeyJustPressed('w') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
+      const newId = this.weatherSystem.cycleWeather(this.timeManager.getTotalSeconds());
+      const def = this.weatherSystem.getCurrentWeather();
+      console.log(`[Weather] Cycled to ${newId} ${def?.icon ?? ''} ${def?.name ?? ''}`);
+      this.saveRenderer.showMessage(`🌦️ Weather: ${def?.icon ?? ''} ${def?.name ?? newId} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}%`, '#8af', 3);
+      // If rainy, water all plots immediately for feedback
+      if (this.weatherSystem.isRaining()) {
+        const plots = this.farmingSystem.getAllPlots();
+        let wateredCount = 0;
+        for (const plot of plots) {
+          if (!plot.isWatered() && plot.getState() !== 'TILLED' as any && plot.getState() !== 'READY' as any && plot.getState() !== 'WITHERED' as any) {
+            const ok = this.farmingSystem.waterPlot(plot.getX(), plot.getY(), plot.getMapId(), this.timeManager.getTotalSeconds());
+            if (ok) wateredCount++;
+          }
+        }
+        if (wateredCount > 0) {
+          console.log(`[Weather] Rain watered ${wateredCount} plots`);
+        }
+      }
+      return;
+    }
+  }
+
   // ==================== PHASE 14 INVENTORY INPUT ==================== ==================== ====================
 
   private handleInventoryInput(): void {
@@ -1661,6 +1740,41 @@ export class Game {
       this.animalSystem.update(this.timeManager.getTotalSeconds(), deltaTime, this.navigationGrid ?? undefined);
     }
 
+    // Weather update - transitions based on totalSeconds
+    if (this.weatherSystem && this.timeManager) {
+      const weatherResult = this.weatherSystem.update(this.timeManager.getTotalSeconds(), deltaTime);
+      if (weatherResult.changed) {
+        const def = this.weatherSystem.getCurrentWeather();
+        this.saveRenderer.showMessage(`🌦️ Weather changed to ${def?.icon ?? ''} ${def?.name ?? weatherResult.newId} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}%`, '#8af', 3);
+        // Auto-water when rainy/stormy
+        if (this.weatherSystem.isRaining()) {
+          const plots = this.farmingSystem.getAllPlots();
+          let watered = 0;
+          for (const plot of plots) {
+            // Only water growing plots not already watered
+            const state = plot.getState();
+            if ((state as any) === 'GROWING' || (state as any) === 'PLANTED' || (state as any) === 'WATERED') {
+              if (!plot.isWatered()) {
+                if (this.farmingSystem.waterPlot(plot.getX(), plot.getY(), plot.getMapId(), this.timeManager.getTotalSeconds())) {
+                  watered++;
+                }
+              }
+            }
+          }
+          if (watered > 0) console.log(`[Weather] Rain auto-watered ${watered} plots`);
+        }
+      } else {
+        // Continuous light watering while raining - small chance per frame
+        if (this.weatherSystem.isRaining() && Math.random() < 0.03) {
+          const plots = this.farmingSystem.getAllPlots().filter(p => !p.isWatered() && (p.getState() as any) !== 'TILLED' && (p.getState() as any) !== 'READY' && (p.getState() as any) !== 'WITHERED');
+          if (plots.length > 0) {
+            const randomPlot = plots[Math.floor(Math.random() * plots.length)];
+            this.farmingSystem.waterPlot(randomPlot.getX(), randomPlot.getY(), randomPlot.getMapId(), this.timeManager.getTotalSeconds());
+          }
+        }
+      }
+    }
+
     const map = this.world.getCurrentMap();
 
     if (this.player && map) {
@@ -1736,6 +1850,7 @@ export class Game {
       this.handleInventoryInput();
       this.handleCraftingInput();
       this.handleCookingInput();
+      this.handleWeatherInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
@@ -2051,6 +2166,18 @@ export class Game {
           showCooking: this.showCooking
         });
       }
+
+      if (this.weatherSystem) {
+        (this.debug as any).setWeatherInfo?.({
+          weatherCount: this.weatherDatabase.getCount(),
+          weathers: this.weatherDatabase.getAllWeathers().map(w=>w.id),
+          current: this.weatherSystem.getCurrentWeatherId(),
+          intensity: this.weatherSystem.getIntensity(),
+          totalChanges: this.weatherSystem.getTotalChanges(),
+          debug: this.weatherSystem.getDebugString(),
+          showWeather: this.showWeather
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -2358,6 +2485,7 @@ export class Game {
       console.log(`[Inventory] ${this.itemDatabase.getCount()} items DB: ${this.itemDatabase.getCategories().join(',')} | Player: ${this.player?.getInventoryDebugString()} | Value: ${this.player?.getInventory().getTotalValue()}`);
       console.log(`[Farming] ${this.cropDatabase.getDebugString()} | ${this.farmingSystem.getDebugString()} | Map: ${this.farmingSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
       console.log(`[Animals] ${this.animalDatabase.getDebugString()} | ${this.animalSystem.getDebugString()} | Map: ${this.animalSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
+      console.log(`[Weather] ${this.weatherDatabase.getDebugString()} | ${this.weatherSystem.getDebugString()}`);
       if (this.player) {
         console.log(`[Inventory Detailed] ${this.player.getInventoryDetailedString()}`);
         const tilePos = this.player.getTilePosition();
@@ -2399,6 +2527,7 @@ export class Game {
       this.runPhase16_1Tests();
       this.runPhase16_2Tests();
       this.runPhase16_3Tests();
+      this.runPhase16_4Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
@@ -3242,6 +3371,60 @@ export class Game {
     console.log(`[Cooking] ${this.cookingSystem.getDebugString()} | Recipes: ${this.cookingDatabase.getDebugString()}`);
   }
 
+  private runPhase16_4Tests(): void {
+    console.log('=== PHASE 16.4 TESTS - WEATHER SYSTEM ===');
+
+    const weatherCount = this.weatherDatabase.getCount();
+    console.log(`Test1 WeatherDatabase count: ${weatherCount} weathers (expected 6) -> ${weatherCount===6 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Weathers: ${this.weatherDatabase.getDebugString()}`);
+
+    const validation = this.weatherDatabase.validate();
+    console.log(`Test2 WeatherDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const current = this.weatherSystem.getCurrentWeather();
+    console.log(`Test3 current weather: ${current?.id} ${current?.icon} ${current?.name} -> ${current ? 'PASS' : 'FAIL'}`);
+
+    const intensity = this.weatherSystem.getIntensity();
+    console.log(`Test4 intensity: ${intensity.toFixed(2)} range 0-1 -> ${intensity>=0 && intensity<=1 ? 'PASS' : 'FAIL'}`);
+
+    const isRaining = this.weatherSystem.isRaining();
+    console.log(`Test5 isRaining: ${isRaining} (bool) -> PASS`);
+
+    const saveData = this.weatherSystem.getSaveData();
+    console.log(`Test6 getSaveData: current=${saveData.current} intensity=${saveData.intensity.toFixed(2)} changes=${saveData.totalChanges} -> ${saveData.current ? 'PASS' : 'FAIL'}`);
+
+    const newWeather = new WeatherSystem(this.weatherDatabase);
+    newWeather.loadSaveData(saveData);
+    console.log(`Test6b loadSaveData: current=${newWeather.getCurrentWeatherId()} expected ${saveData.current} -> ${newWeather.getCurrentWeatherId()===saveData.current ? 'PASS' : 'FAIL'}`);
+
+    const beforeChanges = this.weatherSystem.getTotalChanges();
+    const nextId = this.weatherSystem.cycleWeather(this.timeManager.getTotalSeconds());
+    console.log(`Test7 cycleWeather: ${nextId} changes ${beforeChanges} -> ${this.weatherSystem.getTotalChanges()} expected ${beforeChanges+1} -> ${this.weatherSystem.getTotalChanges()===beforeChanges+1 ? 'PASS' : 'FAIL'}`);
+
+    // Test rainy auto-water integration
+    const testX = 20, testY = 30;
+    const currentMapId = this.world.getCurrentMap()?.mapId ?? 'village_01';
+    const existing = this.farmingSystem.getPlot(testX, testY, currentMapId);
+    if (existing) (this.farmingSystem as any).plots.delete(existing.getId());
+    this.farmingSystem.createPlot(testX, testY, currentMapId, this.timeManager.getTotalSeconds(), this.world.getCurrentMap());
+    this.farmingSystem.plantSeed(testX, testY, currentMapId, 'wheat_seed', this.timeManager.getTotalSeconds());
+    const plotBefore = this.farmingSystem.getPlot(testX, testY, currentMapId);
+    console.log(`Test8a plant for rain test: ${plotBefore?.getCropId()} watered=${plotBefore?.isWatered()} -> ${plotBefore ? 'PASS' : 'FAIL'}`);
+    // Simulate rain watering
+    this.weatherSystem.setWeather('rainy', 0.8, this.timeManager.getTotalSeconds());
+    const watered = this.farmingSystem.waterPlot(testX, testY, currentMapId, this.timeManager.getTotalSeconds());
+    const plotAfter = this.farmingSystem.getPlot(testX, testY, currentMapId);
+    console.log(`Test8b rain waters plot: watered=${watered} now watered=${plotAfter?.isWatered()} -> ${plotAfter?.isWatered() ? 'PASS' : 'FAIL'}`);
+    // Cleanup
+    (this.farmingSystem as any).plots.delete(`plot_${testX}_${testY}_${currentMapId}`);
+    // Restore sunny
+    this.weatherSystem.setWeather('sunny', 0, this.timeManager.getTotalSeconds());
+
+    console.log('=== END PHASE 16.4 TESTS ===');
+    console.log(`[Weather] ${this.weatherSystem.getDebugString()} | Weathers: ${this.weatherDatabase.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -3305,6 +3488,11 @@ export class Game {
       if (this.showVisionDebug) {
         this.explorationRenderer.renderVisionDebug(ctx, this.worldRenderer, this.camera, this.player.x, this.player.y, this.explorationSystem.getVisionRadius());
       }
+    }
+
+    // Weather overlay - after player, before time overlay, so rain over world but under UI
+    if (this.showWeather && this.weatherSystem) {
+      this.weatherRenderer.render(ctx, w, h, this.weatherSystem, 0.016);
     }
 
     if (this.showTimeOverlay && this.timeManager) {
@@ -3448,7 +3636,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 16.3 - COOKING SYSTEM',
+      'PHASE 16.4 - WEATHER SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -3505,12 +3693,18 @@ export class Game {
       '  Recipes: fried_egg, omelette, cheese, pancake, soup, stew, cake, salad, truffle soup, egg bread deluxe',
       '  Stations: campfire, stove, kitchen (display only), ingredients from farm/animals',
       '  Effects: hunger/health/stamina restore, better than raw',
-      '  P - Print all including cooking, T - Run all tests 7-16.3',
+      'Weather System (Phase 16.4):',
+      '  Shift+W - Toggle weather overlay (rain/snow/fog visuals)',
+      '  Ctrl+Shift+W - Cycle weather manually (sunny→cloudy→rainy→stormy→foggy→snowy)',
+      '  Weathers: sunny ☀️, cloudy ☁️, rainy 🌧️ auto-waters crops, stormy ⛈️, foggy 🌫️ reduces vision, snowy ❄️',
+      '  Effects: farming growth multiplier, animal happiness, vision, stamina',
+      '  Rain auto-waters growing plots, transitions every 0.2-3 days game time',
+      '  P - Print all including weather, T - Run all tests 7-16.4',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable | Weather: ${this.weatherSystem.getCurrentWeather()?.icon ?? ''}${this.weatherSystem.getCurrentWeatherId()} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}%`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -3613,10 +3807,14 @@ export class Game {
   getCookingDatabase(): CookingDatabase { return this.cookingDatabase; }
   getCookingSystem(): CookingSystem { return this.cookingSystem; }
   getCookingRenderer(): CookingRenderer { return this.cookingRenderer; }
+  getWeatherDatabase(): WeatherDatabase { return this.weatherDatabase; }
+  getWeatherSystem(): WeatherSystem { return this.weatherSystem; }
+  getWeatherRenderer(): WeatherRenderer { return this.weatherRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
   isAnimalsShowing(): boolean { return this.showAnimals; }
   isCraftingShowing(): boolean { return this.showCrafting; }
   isCookingShowing(): boolean { return this.showCooking; }
+  isWeatherShowing(): boolean { return this.showWeather; }
   isGameRunning(): boolean { return this.isRunning; }
 }

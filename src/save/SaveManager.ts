@@ -446,7 +446,7 @@ export class SaveManager {
       animals: saveFile.world.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
       crafting: saveFile.world.crafting ?? { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
       cooking: (saveFile.world as any).cooking ?? { recipesUnlocked: [], totalCooked: 0, cookedCounts: {}, version: 1 },
-      weather: saveFile.world.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
+      weather: saveFile.world.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, totalChanges: 0, version: 1 },
       economy: saveFile.world.economy ?? { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: saveFile.world.dungeons ?? {},
       events: saveFile.world.events ?? {},

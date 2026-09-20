@@ -254,6 +254,16 @@ export interface CookingDebugInfo {
   showCooking: boolean;
 }
 
+export interface WeatherDebugInfo {
+  weatherCount: number;
+  weathers: string[];
+  current: string;
+  intensity: number;
+  totalChanges: number;
+  debug: string;
+  showWeather: boolean;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -298,7 +308,8 @@ export class DebugManager {
   private inventoryInfo: InventoryDebugInfo | null = null;
   private craftingInfo: CraftingDebugInfo | null = null;
   private cookingInfo: CookingDebugInfo | null = null;
-  private currentPhase: string = '18';
+  private weatherInfo: WeatherDebugInfo | null = null;
+  private currentPhase: string = '19';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -353,6 +364,7 @@ export class DebugManager {
   setInventoryInfo(info: InventoryDebugInfo): void { this.inventoryInfo = info; }
   setCraftingInfo(info: CraftingDebugInfo): void { this.craftingInfo = info; }
   setCookingInfo(info: CookingDebugInfo): void { this.cookingInfo = info; }
+  setWeatherInfo(info: WeatherDebugInfo): void { this.weatherInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -392,12 +404,13 @@ export class DebugManager {
     const inventoryHeight = this.inventoryInfo ? 15 : 0;
     const craftingHeight = this.craftingInfo ? 15 : 0;
     const cookingHeight = this.cookingInfo ? 15 : 0;
+    const weatherHeight = this.weatherInfo ? 15 : 0;
     const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -472,6 +485,13 @@ export class DebugManager {
     if (this.cookingInfo) {
       ctx.fillStyle = '#ffb74d';
       ctx.fillText(`COOKING: Recipes ${this.cookingInfo.recipeCount} ${this.cookingInfo.recipes.slice(0,4).join(',')} | Unlocked:${this.cookingInfo.unlockedCount} Cooked:${this.cookingInfo.totalCooked} | ${this.cookingInfo.debug} UI:${this.cookingInfo.showCooking?'OPEN':'CLOSED'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.weatherInfo) {
+      ctx.fillStyle = '#8af';
+      ctx.fillText(`WEATHER: ${this.weatherInfo.weatherCount} ${this.weatherInfo.weathers.slice(0,4).join(',')} | Current:${this.weatherInfo.current} ${(this.weatherInfo.intensity*100).toFixed(0)}% Changes:${this.weatherInfo.totalChanges} | ${this.weatherInfo.debug} Overlay:${this.weatherInfo.showWeather?'ON':'OFF'}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
