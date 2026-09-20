@@ -1,5 +1,5 @@
 /**
- * Game - Phase 16.5 Economy / Shop System
+ * Game - Phase 17 Quest System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
@@ -78,6 +78,9 @@ import { WeatherRenderer } from '../weather/WeatherRenderer';
 import { ShopDatabase } from '../economy/ShopDatabase';
 import { EconomySystem } from '../economy/EconomySystem';
 import { EconomyRenderer } from '../economy/EconomyRenderer';
+import { QuestDatabase } from '../quests/QuestDatabase';
+import { QuestSystem } from '../quests/QuestSystem';
+import { QuestRenderer } from '../quests/QuestRenderer';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -168,6 +171,13 @@ export class Game {
   private showEconomy: boolean = false;
   private showEconomyDebug: boolean = true;
 
+  // Phase 17 Quest System
+  private questDatabase: QuestDatabase;
+  private questSystem: QuestSystem;
+  private questRenderer: QuestRenderer;
+  private showQuests: boolean = false;
+  private showQuestDebug: boolean = true;
+
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
   private accumulatedTime: number = 0;
@@ -254,12 +264,15 @@ export class Game {
     this.economyDatabase = ShopDatabase.getInstance();
     this.economySystem = new EconomySystem(this.economyDatabase);
     this.economyRenderer = new EconomyRenderer();
+    this.questDatabase = QuestDatabase.getInstance();
+    this.questSystem = new QuestSystem(this.questDatabase);
+    this.questRenderer = new QuestRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 16.5 - Economy / Shop System...');
+    console.log('[Game] Initializing Phase 17 - Quest System...');
 
     this.input.initialize(this.canvas);
 
@@ -339,6 +352,7 @@ export class Game {
         if (this.player) {
           const tilePos = this.player.getTilePosition();
           this.explorationSystem.update(tilePos, map.mapId);
+          this.questSystem.recordVisitedMap(map.mapId);
           console.log(`[Game] Exploration initial: ${this.explorationSystem.getMapDebugString(map.mapId)}`);
         }
 
@@ -433,6 +447,18 @@ export class Game {
         console.log(`[Game] EconomySystem: ${this.economySystem.getDebugString()}`);
         this.economyRenderer.setShowEconomy(this.showEconomy);
 
+        // Phase 17 Quest System init
+        this.questSystem.initialize();
+        console.log(`[Game] QuestDatabase: ${this.questDatabase.getCount()} quests: ${this.questDatabase.getDebugString()}`);
+        const questValidation = this.questDatabase.validate();
+        if (!questValidation.valid) {
+          console.warn('[Game] QuestDatabase validation errors:', questValidation.errors);
+        } else {
+          console.log('[Game] QuestDatabase validation PASS');
+        }
+        console.log(`[Game] QuestSystem: ${this.questSystem.getDebugString()}`);
+        this.questRenderer.setShowQuests(this.showQuests);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -451,7 +477,8 @@ export class Game {
         console.log(`[Game] Phase 16.3: Cooking System - data-driven recipes, ingredients consumption, stations, persistence`);
         console.log(`[Game] Phase 16.4: Weather System - data-driven weathers, transitions, visuals, farming auto-water, persistence`);
         console.log(`[Game] Phase 16.5: Economy / Shop System - data-driven shops, buy/sell, prices, transaction history, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, Shift+B economy/shop, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 17: Quest System - data-driven quests, objectives, rewards, prerequisites, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, Shift+B economy/shop, Shift+Q quest journal, E till/plant/harvest/feed/collect/pet/talk, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -535,6 +562,7 @@ export class Game {
     const cookingSave = this.cookingSystem.getSaveData();
     const weatherSave = this.weatherSystem.getSaveData();
     const economySave = this.economySystem.getSaveData();
+    const questSave = this.questSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -566,7 +594,7 @@ export class Game {
       npcs[npc.id] = npc.getSaveData(currentMapId);
     }
 
-    const quests = { quests: {}, version: 1 };
+    const quests = questSave as any;
 
     const timeData = this.timeManager.getTimeData();
     const explorationPerc = this.explorationSystem.getExplorationPercentage(currentMapId);
@@ -681,6 +709,11 @@ export class Game {
         console.log(`[Game] Economy loaded: ${this.economySystem.getDebugString()}`);
       }
 
+      if (saveFile.quests) {
+        this.questSystem.loadSaveData(saveFile.quests);
+        console.log(`[Game] Quests loaded: ${this.questSystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -728,7 +761,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()} weather ${this.weatherSystem.getDebugString()} economy ${this.economySystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()} weather ${this.weatherSystem.getDebugString()} economy ${this.economySystem.getDebugString()} quests ${this.questSystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -851,6 +884,7 @@ export class Game {
     this.cookingSystem.clear();
     this.weatherSystem.clear();
     this.economySystem.clear();
+    this.questSystem.clear();
     this.weatherSystem.initialize(this.timeManager.getTotalSeconds());
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
@@ -883,6 +917,8 @@ export class Game {
     this.weatherRenderer.setShowWeather(true);
     this.showEconomy = false;
     this.economyRenderer.setShowEconomy(false);
+    this.showQuests = false;
+    this.questRenderer.setShowQuests(false);
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -905,7 +941,8 @@ export class Game {
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen) return;
+    const isQuestOpen = this.showQuests;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -989,6 +1026,8 @@ export class Game {
               if (result.bonusSeeds > 0 && result.bonusSeedId) {
                 this.player.addItem(result.bonusSeedId, result.bonusSeeds);
               }
+              // Quest tracking
+              this.questSystem.recordHarvestedCrop(result.cropId, result.yield);
             }
           }
         } else if (state === PlotState.WITHERED) {
@@ -1065,7 +1104,8 @@ export class Game {
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen) return;
+    const isQuestOpen = this.showQuests;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1117,6 +1157,8 @@ export class Game {
             const added = this.player.addItem(result.itemId, result.quantity);
             console.log(`[Animals] Collected ${result.quantity}x ${result.itemId} from ${animal.getType()} added ${added}`);
             this.saveRenderer.showMessage(`🐾 Collected ${result.quantity}x ${result.itemId} from ${animal.getType()}!`, '#ff8', 3);
+            // Quest tracking
+            this.questSystem.recordAnimalProduce(result.itemId, result.quantity);
           } else {
             console.log(`[Animals] Collect failed chance for ${animal.getType()}`);
             this.saveRenderer.showMessage(`❌ ${animal.getType()} had no produce this time`, '#fa8', 2);
@@ -1159,7 +1201,7 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isEconomyOpen = this.showEconomy;
-    if (isEconomyOpen) return;
+    if (isEconomyOpen || this.showQuests) return;
 
     if (this.showCrafting) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift'))) {
@@ -1230,9 +1272,10 @@ export class Game {
         if (idx >= 0 && idx < filtered.length) {
           const recipe = filtered[idx];
           const result = this.craftingSystem.craft(recipe.id, this.player.getInventory());
-          if (result.success) {
+          if (result.success && result.resultItemId) {
             console.log(`[Crafting] Crafted ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
             this.saveRenderer.showMessage(`🔨 Crafted ${result.resultQuantity}x ${result.resultItemId}!`, '#8f8', 2);
+            this.questSystem.recordCrafted(result.resultItemId, result.resultQuantity ?? 1);
           } else {
             console.log(`[Crafting] Craft failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Craft failed: ${result.reason}`, '#f88', 2);
@@ -1264,7 +1307,7 @@ export class Game {
   private handleCookingInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
-    if (this.showEconomy) return;
+    if (this.showEconomy || this.showQuests) return;
 
     if (this.showCooking) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift'))) {
@@ -1350,9 +1393,10 @@ export class Game {
         if (idx >= 0 && idx < filtered.length) {
           const recipe = filtered[idx];
           const result = this.cookingSystem.cook(recipe.id, this.player.getInventory());
-          if (result.success) {
+          if (result.success && result.resultItemId) {
             console.log(`[Cooking] Cooked ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
             this.saveRenderer.showMessage(`🍳 Cooked ${result.resultQuantity}x ${result.resultItemId}!`, '#ffb74d', 2);
+            this.questSystem.recordCooked(result.resultItemId, result.resultQuantity ?? 1);
           } else {
             console.log(`[Cooking] Cook failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Cook failed: ${result.reason}`, '#f88', 2);
@@ -1385,7 +1429,7 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     // Don't block if inventory/crafting/cooking open? Allow toggle even when those open? For simplicity, allow only when no modal
-    if (isDialogueOpen || isSaveUIOpen || this.showEconomy) return;
+    if (isDialogueOpen || isSaveUIOpen || this.showEconomy || this.showQuests) return;
 
     if (this.input.isKeyJustPressed('w') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       this.showWeather = !this.showWeather;
@@ -1423,6 +1467,7 @@ export class Game {
   private handleEconomyInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    if (this.showQuests) return;
 
     if (this.showEconomy) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('b') && this.input.isKeyDown('shift'))) {
@@ -1505,6 +1550,7 @@ export class Game {
           if (result.success) {
             console.log(`[Economy] Bought ${qty}x ${itemId} from ${shop.id} for $${result.transaction?.totalPrice}`);
             this.saveRenderer.showMessage(`🛒 Bought ${qty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#ffd700', 2);
+            this.questSystem.recordBought(itemId, qty);
           } else {
             console.log(`[Economy] Buy failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Buy failed: ${result.reason}`, '#f88', 2);
@@ -1539,6 +1585,7 @@ export class Game {
           if (result.success) {
             console.log(`[Economy] Sold ${sellQty}x ${itemId} to ${shop.id} for $${result.transaction?.totalPrice}`);
             this.saveRenderer.showMessage(`💰 Sold ${sellQty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#8f8', 2);
+            this.questSystem.recordSold(itemId, sellQty);
           } else {
             console.log(`[Economy] Sell failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Sell failed: ${result.reason}`, '#f88', 2);
@@ -1564,6 +1611,96 @@ export class Game {
     }
   }
 
+  // ==================== PHASE 17 QUEST INPUT ====================
+
+  private handleQuestInput(): void {
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (this.showQuests) {
+      if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('q') && this.input.isKeyDown('shift'))) {
+        this.showQuests = false;
+        this.questRenderer.setShowQuests(false);
+        console.log('[Quests] Closed quest UI');
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        const filteredCount = (this.questRenderer as any).getFilteredQuests ? 0 : 0;
+        // Compute filtered length
+        let quests = this.questSystem.getAllQuestInstances();
+        const filter = this.questRenderer.getFilterStatus();
+        if (filter) quests = quests.filter(q => q.status === filter);
+        this.questRenderer.navigate('up', quests.length);
+      }
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        let quests = this.questSystem.getAllQuestInstances();
+        const filter = this.questRenderer.getFilterStatus();
+        if (filter) quests = quests.filter(q => q.status === filter);
+        this.questRenderer.navigate('down', quests.length);
+      }
+
+      if (this.input.isKeyJustPressed('c') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.questRenderer.cycleFilter();
+        console.log(`[Quests] Filter: ${this.questRenderer.getFilterStatus() ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('q') && !this.input.isKeyDown('shift')) {
+        this.questRenderer.cycleFilter();
+        console.log(`[Quests] Filter (Q): ${this.questRenderer.getFilterStatus() ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        if (!this.player) return;
+        let quests = this.questSystem.getAllQuestInstances();
+        const filter = this.questRenderer.getFilterStatus();
+        if (filter) quests = quests.filter(q => q.status === filter);
+        quests.sort((a,b) => {
+          const order: Record<string, number> = { ACTIVE:0, AVAILABLE:1, COMPLETED:2, LOCKED:3, FAILED:4 } as any;
+          const oa = (order as any)[a.status] ?? 5;
+          const ob = (order as any)[b.status] ?? 5;
+          if (oa!==ob) return oa-ob;
+          return a.definition.name.localeCompare(b.definition.name);
+        });
+        const idx = this.questRenderer.getSelectedQuestIndex();
+        if (idx>=0 && idx<quests.length) {
+          const quest = quests[idx];
+          if (quest.status === 'AVAILABLE') {
+            const res = this.questSystem.startQuest(quest.definition.id, this.timeManager.getTotalSeconds());
+            if (res.success) {
+              console.log(`[Quests] Started ${quest.definition.id}`);
+              this.saveRenderer.showMessage(`📜 Started quest: ${quest.definition.icon} ${quest.definition.name}!`, '#8af', 2);
+            } else {
+              this.saveRenderer.showMessage(`❌ Cannot start: ${res.reason}`, '#f88', 2);
+            }
+          } else if (quest.status === 'ACTIVE') {
+            this.saveRenderer.showMessage(`📜 Quest active: ${quest.definition.name} ${this.questSystem.getQuestProgress(quest.definition.id)?.completed}/${this.questSystem.getQuestProgress(quest.definition.id)?.total}`, '#8af', 2);
+          } else if (quest.status === 'COMPLETED') {
+            this.saveRenderer.showMessage(`✓ Quest completed: ${quest.definition.name}`, '#8f8', 2);
+          } else if (quest.status === 'LOCKED') {
+            this.saveRenderer.showMessage(`🔒 Locked: Complete ${quest.definition.prerequisites?.join(', ')} first`, '#fa8', 2);
+          }
+        }
+      }
+
+      return;
+    }
+
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+      if (this.input.isKeyJustPressed('q') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.showQuests = !this.showQuests;
+        this.questRenderer.setShowQuests(this.showQuests);
+        if (this.showQuests) {
+          console.log('[Quests] Opened quest UI');
+          this.questRenderer.setSelectedQuestIndex(0);
+        } else {
+          console.log('[Quests] Closed quest UI');
+        }
+        return;
+      }
+    }
+  }
+
   // ==================== PHASE 14 INVENTORY INPUT ==================== ==================== ====================
 
   private handleInventoryInput(): void {
@@ -1572,6 +1709,8 @@ export class Game {
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
+    const isQuestOpen = this.showQuests;
+    if (isQuestOpen) return;
 
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
@@ -1824,6 +1963,7 @@ export class Game {
     this.playerMapId = targetMapId;
     this.openedLocations.add(targetMapId);
     this.explorationSystem.recordMapTransition();
+    this.questSystem.recordVisitedMap(targetMapId);
     this.mapTransitionCooldown = 1.0;
 
     if (this.player) {
@@ -1848,6 +1988,7 @@ export class Game {
     if (this.showCrafting) return;
     if (this.showCooking) return;
     if (this.showEconomy) return;
+    if (this.showQuests) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1911,13 +2052,13 @@ export class Game {
 
     if (this.autoSaveTimer >= this.autoSaveInterval) {
       this.autoSaveTimer = 0;
-      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
         console.log('[Save] Auto-save triggered');
         this.saveGame(AUTO_SAVE_SLOT);
       }
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
       this.timeManager.update(deltaTime);
     }
 
@@ -1929,6 +2070,19 @@ export class Game {
     // Animals update - uses totalSeconds and navigationGrid for wander
     if (this.animalSystem && this.timeManager) {
       this.animalSystem.update(this.timeManager.getTotalSeconds(), deltaTime, this.navigationGrid ?? undefined);
+    }
+
+    // Quest update - check objectives each frame if player exists
+    if (this.questSystem && this.player && this.timeManager) {
+      const visited = new Set<string>(Array.from(this.openedLocations));
+      const result = this.questSystem.updateObjectives(this.player as any, visited, this.timeManager.getTotalSeconds());
+      if (result.completedQuests.length > 0) {
+        for (const qId of result.completedQuests) {
+          const qDef = this.questDatabase.getQuest(qId);
+          this.saveRenderer.showMessage(`📜 Quest completed: ${qDef?.icon ?? ''} ${qDef?.name ?? qId}! +$${qDef?.rewards.money ?? 0}`, '#8f8', 4);
+          console.log(`[Quests] Completed ${qId} rewards $${qDef?.rewards.money ?? 0}`);
+        }
+      }
     }
 
     // Weather update - transitions based on totalSeconds
@@ -2020,12 +2174,13 @@ export class Game {
       const isCraftingOpen = this.showCrafting;
       const isCookingOpen = this.showCooking;
       const isEconomyOpen = this.showEconomy;
-      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen) {
+      const isQuestOpen = this.showQuests;
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
@@ -2034,7 +2189,7 @@ export class Game {
       }
 
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy) {
+      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy && !this.showQuests) {
         this.handleDialogueInput();
       }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
@@ -2044,6 +2199,7 @@ export class Game {
       this.handleCookingInput();
       this.handleWeatherInput();
       this.handleEconomyInput();
+      this.handleQuestInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
@@ -2384,6 +2540,19 @@ export class Game {
           showEconomy: this.showEconomy
         });
       }
+
+      if (this.questSystem) {
+        (this.debug as any).setQuestInfo?.({
+          questCount: this.questDatabase.getCount(),
+          quests: this.questDatabase.getAllQuests().map(q=>q.id),
+          activeCount: this.questSystem.getActiveQuests().length,
+          completedCount: this.questSystem.getCompletedQuests().length,
+          totalStarted: this.questSystem.getTotalStarted(),
+          totalCompleted: this.questSystem.getTotalCompleted(),
+          debug: this.questSystem.getDebugString(),
+          showQuests: this.showQuests
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -2458,6 +2627,8 @@ export class Game {
           this.player.npcsMet.add(interactable.npc.id);
           this.player.totalInteractions++;
         }
+        // Quest tracking: talked NPC
+        this.questSystem.recordTalkedNPC(interactable.npc.id);
         console.log(`[Interaction] Started dialogue with ${interactable.npc.id}`);
 
       } else if (interactable.type === 'BUILDING' && interactable.building) {
@@ -2491,7 +2662,7 @@ export class Game {
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
 
-    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking || this.showEconomy) return;
+    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking || this.showEconomy || this.showQuests) return;
 
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
@@ -2694,6 +2865,8 @@ export class Game {
       console.log(`[Weather] ${this.weatherDatabase.getDebugString()} | ${this.weatherSystem.getDebugString()}`);
       console.log(`[Economy] ${this.economyDatabase.getDebugString()} | ${this.economySystem.getDebugString()}`);
       this.economySystem.debugPrint();
+      console.log(`[Quests] ${this.questDatabase.getDebugString()} | ${this.questSystem.getDebugString()}`);
+      this.questSystem.debugPrint();
       if (this.player) {
         console.log(`[Inventory Detailed] ${this.player.getInventoryDetailedString()}`);
         const tilePos = this.player.getTilePosition();
@@ -2737,6 +2910,7 @@ export class Game {
       this.runPhase16_3Tests();
       this.runPhase16_4Tests();
       this.runPhase16_5Tests();
+      this.runPhase17Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
@@ -3690,6 +3864,55 @@ export class Game {
     console.log(`[Economy] ${this.economySystem.getDebugString()}`);
   }
 
+  private runPhase17Tests(): void {
+    console.log('=== PHASE 17 TESTS - QUEST SYSTEM ===');
+
+    const questCount = this.questDatabase.getCount();
+    console.log(`Test1 QuestDatabase count: ${questCount} quests (expected 3) -> ${questCount===3 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Quests: ${this.questDatabase.getDebugString()}`);
+
+    const validation = this.questDatabase.validate();
+    console.log(`Test2 QuestDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const available = this.questSystem.getAvailableQuests();
+    console.log(`Test3 available quests: ${available.length} expected 2 -> ${available.length===2 ? 'PASS' : 'FAIL'}`);
+
+    const playerInv = this.player?.getInventory();
+    if (playerInv) {
+      playerInv.clearInventory();
+      playerInv.addItem('wheat_seed', 5);
+      playerInv.addItem('wheat', 5);
+      playerInv.addItem('wood', 15);
+    }
+    const player = this.player as any;
+    if (player) {
+      const canStart = this.questSystem.canStartQuest('quest_first_harvest');
+      console.log(`Test4 canStart first_harvest: can=${canStart.can} -> ${canStart.can ? 'PASS' : 'FAIL'}`);
+      const startRes = this.questSystem.startQuest('quest_first_harvest', this.timeManager.getTotalSeconds());
+      console.log(`Test5 start first_harvest: success=${startRes.success} -> ${startRes.success ? 'PASS' : 'FAIL'}`);
+      this.questSystem.recordHarvestedCrop('wheat', 1);
+      const upd = this.questSystem.updateObjectives(player, new Set([this.world.getCurrentMap()?.mapId ?? 'village_01']), this.timeManager.getTotalSeconds());
+      console.log(`Test6 update after wheat 5 + harvest 1: completed ${upd.completedQuests.length} expected 1 -> ${upd.completedQuests.length===1 ? 'PASS' : 'FAIL'}`);
+      console.log(`  totalCompleted ${this.questSystem.getTotalCompleted()} expected 1 -> ${this.questSystem.getTotalCompleted()===1 ? 'PASS' : 'FAIL'}`);
+      // Reset for next tests
+      this.questSystem.clear();
+      if (playerInv) {
+        playerInv.clearInventory();
+      }
+      player.money = 50;
+    }
+
+    const saveData = this.questSystem.getSaveData();
+    console.log(`Test7 getSaveData: quests=${Object.keys(saveData.quests).length} completed=${saveData.totalCompleted} -> ${Object.keys(saveData.quests).length===3 ? 'PASS' : 'FAIL'}`);
+    const newQuestSystem = new QuestSystem(this.questDatabase, this.itemDatabase);
+    newQuestSystem.loadSaveData(saveData);
+    console.log(`Test7b loadSaveData: count ${newQuestSystem.getCount()} expected 3 -> ${newQuestSystem.getCount()===3 ? 'PASS' : 'FAIL'}`);
+
+    console.log('=== END PHASE 17 TESTS ===');
+    console.log(`[Quests] ${this.questSystem.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -3780,7 +4003,7 @@ export class Game {
       this.minimapRenderer.renderFullMap(ctx, map, this.explorationSystem, w, h);
     }
 
-    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
       this.dialogueRenderer.renderInteractionPrompt(ctx, this.interactionSystem, w, h);
     }
 
@@ -3798,15 +4021,18 @@ export class Game {
       this.cookingRenderer.render(ctx, w, h, this.cookingSystem, this.player.getInventory());
     } else if (this.showEconomy && this.player) {
       this.economyRenderer.render(ctx, w, h, this.economySystem, this.player.getInventory(), this.player.money);
+    } else if (this.showQuests && this.player) {
+      this.questRenderer.render(ctx, w, h, this.questSystem, this.player.getInventory(), this.player.money);
     } else if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       // Quick hints
       this.craftingRenderer.renderQuickHint(ctx, w, h, this.craftingSystem, this.player.getInventory());
       this.cookingRenderer.renderQuickHint(ctx, w, h, this.cookingSystem, this.player.getInventory());
       this.economyRenderer.renderQuickHint(ctx, w, h, this.economySystem, this.player.money);
+      this.questRenderer.renderQuickHint(ctx, w, h, this.questSystem);
     }
 
     // Farming selected plot info (when not in inventory)
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
@@ -3814,7 +4040,7 @@ export class Game {
     }
 
     // Animals selected info
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
       const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
       if (animal) {
         this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
@@ -3831,7 +4057,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -3904,7 +4130,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 16.5 - ECONOMY / SHOP SYSTEM',
+      'PHASE 17 - QUEST SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -3974,12 +4200,20 @@ export class Game {
       '  Buy: price = value x buyMultiplier (1.2 general, 1.15 food, 1.3 tool), checks money + inventory space',
       '  Sell: price = value x sellMultiplier (0.7 general, 0.8 food, 0.75 tool), adds to shop stock',
       '  Transaction history, totalSpent/totalEarned, persistence v20',
-      '  P - Print all including economy, T - Run all tests 7-16.5',
+      'Quest System (Phase 17):',
+      '  Shift+Q - Toggle quest journal UI (Q for quest, avoid WASD)',
+      '  W/S - Navigate quests, C/Q cycle filter status ALL→AVAILABLE→ACTIVE→COMPLETED→LOCKED, Enter start quest',
+      '  Objectives: COLLECT_ITEM (inventory qty), TALK_NPC (E talk), VISIT_MAP (travel), HARVEST_CROP (farming), etc.',
+      '  Auto-complete when all objectives done, rewards money + items + XP, unlocks next quests via prerequisites',
+      '  3 quests: first_harvest 🌾 (collect wheat_seed 3, harvest wheat 1, have wheat 3), talk_to_elders 💬 (talk NPC001/002, visit village), explorer 🗺️ (visit all 3 maps, collect wood 10) requires talk_to_elders',
+      '  Tracking: talk NPCs, visited maps, harvested crops, crafted/cooked/bought/sold, inventory',
+      '  Persistence v21, quick hint top-right shows active/available',
+      '  P - Print all including quests, T - Run all tests 7-17',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable | Weather: ${this.weatherSystem.getCurrentWeather()?.icon ?? ''}${this.weatherSystem.getCurrentWeatherId()} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}% | Economy: ${this.economySystem.getShopCount()} shops Stock:${this.economySystem.getTotalStockCount()} Tx:${this.economySystem.getTotalTransactions()} $${this.economySystem.getTotalSpent()}/$${this.economySystem.getTotalEarned()}`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable | Weather: ${this.weatherSystem.getCurrentWeather()?.icon ?? ''}${this.weatherSystem.getCurrentWeatherId()} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}% | Economy: ${this.economySystem.getShopCount()} shops Stock:${this.economySystem.getTotalStockCount()} Tx:${this.economySystem.getTotalTransactions()} $${this.economySystem.getTotalSpent()}/$${this.economySystem.getTotalEarned()} | Quests: ${this.questSystem.getCount()} Active:${this.questSystem.getActiveQuests().length} Done:${this.questSystem.getCompletedQuests().length}`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -4088,6 +4322,9 @@ export class Game {
   getEconomyDatabase(): ShopDatabase { return this.economyDatabase; }
   getEconomySystem(): EconomySystem { return this.economySystem; }
   getEconomyRenderer(): EconomyRenderer { return this.economyRenderer; }
+  getQuestDatabase(): QuestDatabase { return this.questDatabase; }
+  getQuestSystem(): QuestSystem { return this.questSystem; }
+  getQuestRenderer(): QuestRenderer { return this.questRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
   isAnimalsShowing(): boolean { return this.showAnimals; }
@@ -4095,5 +4332,6 @@ export class Game {
   isCookingShowing(): boolean { return this.showCooking; }
   isWeatherShowing(): boolean { return this.showWeather; }
   isEconomyShowing(): boolean { return this.showEconomy; }
+  isQuestsShowing(): boolean { return this.showQuests; }
   isGameRunning(): boolean { return this.isRunning; }
 }

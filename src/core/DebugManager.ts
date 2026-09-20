@@ -275,6 +275,17 @@ export interface EconomyDebugInfo {
   showEconomy: boolean;
 }
 
+export interface QuestDebugInfo {
+  questCount: number;
+  quests: string[];
+  activeCount: number;
+  completedCount: number;
+  totalStarted: number;
+  totalCompleted: number;
+  debug: string;
+  showQuests: boolean;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -321,7 +332,8 @@ export class DebugManager {
   private cookingInfo: CookingDebugInfo | null = null;
   private weatherInfo: WeatherDebugInfo | null = null;
   private economyInfo: EconomyDebugInfo | null = null;
-  private currentPhase: string = '20';
+  private questInfo: QuestDebugInfo | null = null;
+  private currentPhase: string = '21';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -378,6 +390,7 @@ export class DebugManager {
   setCookingInfo(info: CookingDebugInfo): void { this.cookingInfo = info; }
   setWeatherInfo(info: WeatherDebugInfo): void { this.weatherInfo = info; }
   setEconomyInfo(info: EconomyDebugInfo): void { this.economyInfo = info; }
+  setQuestInfo(info: QuestDebugInfo): void { this.questInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -419,12 +432,13 @@ export class DebugManager {
     const cookingHeight = this.cookingInfo ? 15 : 0;
     const weatherHeight = this.weatherInfo ? 15 : 0;
     const economyHeight = this.economyInfo ? 15 : 0;
+    const questHeight = this.questInfo ? 15 : 0;
     const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + economyHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + economyHeight + questHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -513,6 +527,13 @@ export class DebugManager {
     if (this.economyInfo) {
       ctx.fillStyle = '#ffd700';
       ctx.fillText(`ECONOMY: Shops ${this.economyInfo.shopCount} ${this.economyInfo.shops.slice(0,3).join(',')} | Stock:${this.economyInfo.totalStock} Tx:${this.economyInfo.totalTransactions} Spent:$${this.economyInfo.totalSpent} Earned:$${this.economyInfo.totalEarned} | ${this.economyInfo.debug} UI:${this.economyInfo.showEconomy?'OPEN':'CLOSED'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.questInfo) {
+      ctx.fillStyle = '#8af';
+      ctx.fillText(`QUESTS: ${this.questInfo.questCount} ${this.questInfo.quests.slice(0,3).join(',')} | Active:${this.questInfo.activeCount} Done:${this.questInfo.completedCount} Started:${this.questInfo.totalStarted} Completed:${this.questInfo.totalCompleted} | ${this.questInfo.debug} UI:${this.questInfo.showQuests?'OPEN':'CLOSED'}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }

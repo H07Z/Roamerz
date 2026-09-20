@@ -4,8 +4,8 @@
  * Supports future: farming, animals, weather, crafting, combat, dungeons, events, relationships, etc.
  */
 
-export const SAVE_VERSION = 20; // Phase 16.5 - Economy / Shop System
-export const SAVE_GAME_VERSION = '0.20.0';
+export const SAVE_VERSION = 21; // Phase 17 - Quest System
+export const SAVE_GAME_VERSION = '0.21.0';
 export const MAX_SAVE_SLOTS = 5;
 export const STORAGE_KEY_PREFIX = 'roamerz_save_';
 export const STORAGE_META_KEY = 'roamerz_save_meta';
@@ -288,11 +288,16 @@ export interface WorldSaveData {
 export interface QuestSaveData {
   quests: Record<string, {
     status: string; // AVAILABLE, ACTIVE, COMPLETED, FAILED, LOCKED
-    progress: Record<string, any>;
-    objectivesCompleted: string[];
+    progress?: Record<string, any>;
+    objectivesCompleted?: string[];
+    objectives?: { id: string; currentAmount: number; completed: boolean }[];
     startedAt?: number;
     completedAt?: number;
+    version?: number;
   }>;
+  totalStarted?: number;
+  totalCompleted?: number;
+  totalFailed?: number;
   version: number;
 }
 
@@ -473,6 +478,9 @@ export function createDefaultWorldSaveData(): WorldSaveData {
 export function createDefaultQuestSaveData(): QuestSaveData {
   return {
     quests: {},
+    totalStarted: 0,
+    totalCompleted: 0,
+    totalFailed: 0,
     version: 1
   };
 }

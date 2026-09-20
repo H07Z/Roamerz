@@ -458,7 +458,10 @@ export class SaveManager {
     saveFile.quests = {
       ...defaultQuests,
       ...(saveFile.quests ?? {}),
-      quests: saveFile.quests?.quests ?? {}
+      quests: saveFile.quests?.quests ?? {},
+      totalStarted: (saveFile.quests as any)?.totalStarted ?? 0,
+      totalCompleted: (saveFile.quests as any)?.totalCompleted ?? 0,
+      totalFailed: (saveFile.quests as any)?.totalFailed ?? 0
     };
 
     // Ensure meta
