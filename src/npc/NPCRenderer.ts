@@ -24,60 +24,63 @@ export class NPCRenderer {
 
   render(ctx: CanvasRenderingContext2D, npc: NPC, worldRenderer: WorldRenderer, camera?: Camera): void {
     let screenPos: { x: number; y: number };
+    let zoom = worldRenderer.getZoom();
     if (camera) {
       screenPos = camera.worldToScreen(npc.x, npc.y);
+      zoom = camera.getZoom();
     } else {
       screenPos = worldRenderer.worldToScreen(npc.x, npc.y);
     }
 
     const x = screenPos.x;
     const y = screenPos.y;
+    const s = zoom;
 
-    if (x < -32 || y < -32 || x > ctx.canvas.width + 32 || y > ctx.canvas.height + 32) return;
+    if (x < -32 * s || y < -32 * s || x > ctx.canvas.width + 32 * s || y > ctx.canvas.height + 32 * s) return;
 
     ctx.save();
 
     const animTime = this.walkAnimTime.get(npc.id) ?? 0;
     let bobOffset = 0;
     if (npc.state === NPCState.WALK || npc.state === NPCState.FOLLOWING_PATH) {
-      bobOffset = Math.sin(animTime) * 1.5;
+      bobOffset = Math.sin(animTime) * 1.5 * s;
     }
 
     // Shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
     ctx.beginPath();
-    ctx.ellipse(x, y + 10, 8, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 10 * s, 8 * s, 3 * s, 0, 0, Math.PI * 2);
     ctx.fill();
 
     const colors = this.getRoleColors(npc.role);
 
     // Body
     ctx.fillStyle = colors.body;
-    ctx.fillRect(x - 7, y - 5 + bobOffset, 14, 12);
+    ctx.fillRect(x - 7 * s, y - 5 * s + bobOffset, 14 * s, 12 * s);
 
     // Head
     ctx.fillStyle = colors.skin;
     ctx.beginPath();
-    ctx.arc(x, y - 8 + bobOffset, 7, 0, Math.PI * 2);
+    ctx.arc(x, y - 8 * s + bobOffset, 7 * s, 0, Math.PI * 2);
     ctx.fill();
 
     // Hat
     ctx.fillStyle = colors.hat;
     ctx.beginPath();
-    ctx.arc(x, y - 11 + bobOffset, 7, Math.PI, 0);
+    ctx.arc(x, y - 11 * s + bobOffset, 7 * s, Math.PI, 0);
     ctx.fill();
 
     // Role icon
     ctx.fillStyle = colors.accent;
-    ctx.font = '10px monospace';
+    ctx.font = `${Math.max(8, 10 * s)}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(this.getRoleIcon(npc.role), x, y - 20 + bobOffset);
+    ctx.fillText(this.getRoleIcon(npc.role), x, y - 20 * s + bobOffset);
 
     // Direction
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     const dirOffset = this.getDirectionOffset(npc.direction);
     ctx.beginPath();
-    ctx.arc(x + dirOffset.x, y - 8 + bobOffset + dirOffset.y, 2, 0, Math.PI * 2);
+    ctx.arc(x + dirOffset.x * s, y - 8 * s + bobOffset + dirOffset.y * s, 2 * s, 0, Math.PI * 2);
     ctx.fill();
 
     // State color: IDLE green, WALK/FOLLOWING yellow, PATHFINDING blue, WAITING/STUCK red
@@ -87,28 +90,28 @@ export class NPCRenderer {
     else if (npc.state === NPCState.WAITING || npc.state === NPCState.STUCK) stateColor = '#f88';
     ctx.fillStyle = stateColor;
     ctx.beginPath();
-    ctx.arc(x + 9, y - 12 + bobOffset, 2.5, 0, Math.PI * 2);
+    ctx.arc(x + 9 * s, y - 12 * s + bobOffset, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
 
     // Name
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(x - 20, y + 14, 40, 12);
+    ctx.fillRect(x - 20 * s, y + 14 * s, 40 * s, 12 * s);
     ctx.fillStyle = '#fff';
-    ctx.font = '8px monospace';
+    ctx.font = `${8 * s}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(npc.name.substring(0, 8), x, y + 22);
+    ctx.fillText(npc.name.substring(0, 8), x, y + 22 * s);
 
     // ID
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = '7px monospace';
-    ctx.fillText(npc.id, x, y + 30);
+    ctx.font = `${7 * s}px monospace`;
+    ctx.fillText(npc.id, x, y + 30 * s);
 
     // Path status
     const path = npc.getPath();
     if (path) {
       ctx.fillStyle = path.isFound() ? '#8f8' : '#f88';
-      ctx.font = '7px monospace';
-      ctx.fillText(`${path.status} ${path.getLength()}`, x, y + 38);
+      ctx.font = `${7 * s}px monospace`;
+      ctx.fillText(`${path.status} ${path.getLength()}`, x, y + 38 * s);
     }
 
     ctx.restore();

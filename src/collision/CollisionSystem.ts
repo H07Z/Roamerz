@@ -199,12 +199,17 @@ export class CollisionSystem {
     if (!this.showCollision || !this.collisionMap) return;
 
     const tileSize = worldRenderer.getTileSize();
+    const zoom = worldRenderer.getZoom();
     const offset = worldRenderer.getOffset();
+    const scaledTileSize = tileSize * zoom;
+
+    const scaledScreenWidth = screenWidth / zoom;
+    const scaledScreenHeight = screenHeight / zoom;
 
     const startCol = Math.floor(offset.x / tileSize);
-    const endCol = Math.ceil((offset.x + screenWidth) / tileSize);
+    const endCol = Math.ceil((offset.x + scaledScreenWidth) / tileSize);
     const startRow = Math.floor(offset.y / tileSize);
-    const endRow = Math.ceil((offset.y + screenHeight) / tileSize);
+    const endRow = Math.ceil((offset.y + scaledScreenHeight) / tileSize);
 
     const clampedStartCol = Math.max(0, startCol);
     const clampedEndCol = Math.min(this.collisionMap.width, endCol);
@@ -218,31 +223,29 @@ export class CollisionSystem {
         const type = this.collisionMap.getCollisionType(x, y);
         if (type === null) continue;
 
-        const screenX = x * tileSize - offset.x;
-        const screenY = y * tileSize - offset.y;
+        const screenX = (x * tileSize - offset.x) * zoom;
+        const screenY = (y * tileSize - offset.y) * zoom;
 
         if (type === CollisionType.BLOCKED) {
           ctx.fillStyle = 'rgba(255, 50, 50, 0.35)';
-          ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
           ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
           ctx.lineWidth = 1;
-          ctx.strokeRect(screenX + 1, screenY + 1, tileSize - 2, tileSize - 2);
-          // X mark
+          ctx.strokeRect(screenX + 1, screenY + 1, scaledTileSize - 2, scaledTileSize - 2);
           ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
           ctx.beginPath();
           ctx.moveTo(screenX + 4, screenY + 4);
-          ctx.lineTo(screenX + tileSize - 4, screenY + tileSize - 4);
-          ctx.moveTo(screenX + tileSize - 4, screenY + 4);
-          ctx.lineTo(screenX + 4, screenY + tileSize - 4);
+          ctx.lineTo(screenX + scaledTileSize - 4, screenY + scaledTileSize - 4);
+          ctx.moveTo(screenX + scaledTileSize - 4, screenY + 4);
+          ctx.lineTo(screenX + 4, screenY + scaledTileSize - 4);
           ctx.stroke();
         } else if (type === CollisionType.INTERACTABLE) {
           ctx.fillStyle = 'rgba(255, 255, 50, 0.35)';
-          ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
           ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
           ctx.lineWidth = 1;
-          ctx.strokeRect(screenX + 1, screenY + 1, tileSize - 2, tileSize - 2);
+          ctx.strokeRect(screenX + 1, screenY + 1, scaledTileSize - 2, scaledTileSize - 2);
         }
-        // WALKABLE not rendered to avoid clutter, but could show green tint
       }
     }
 

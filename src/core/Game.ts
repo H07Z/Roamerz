@@ -173,6 +173,7 @@ export class Game {
       this.camera.update(deltaTime);
       const camOffset = this.camera.getOffset();
       this.worldRenderer.setOffset(camOffset.x, camOffset.y);
+      this.worldRenderer.setZoom(this.camera.getZoom());
 
       this.debug.setPlayerInfo({
         x: this.player.x,
@@ -495,12 +496,16 @@ export class Game {
     if (!this.navigationGrid) return;
 
     const tileSize = this.worldRenderer.getTileSize();
+    const zoom = this.worldRenderer.getZoom();
     const offset = this.camera.getOffset();
+    const scaledTileSize = tileSize * zoom;
+    const scaledScreenWidth = screenWidth / zoom;
+    const scaledScreenHeight = screenHeight / zoom;
 
     const startCol = Math.floor(offset.x / tileSize);
-    const endCol = Math.ceil((offset.x + screenWidth) / tileSize);
+    const endCol = Math.ceil((offset.x + scaledScreenWidth) / tileSize);
     const startRow = Math.floor(offset.y / tileSize);
-    const endRow = Math.ceil((offset.y + screenHeight) / tileSize);
+    const endRow = Math.ceil((offset.y + scaledScreenHeight) / tileSize);
 
     const clampedStartCol = Math.max(0, startCol);
     const clampedEndCol = Math.min(this.navigationGrid.width, endCol);
@@ -511,15 +516,15 @@ export class Game {
 
     for (let y = clampedStartRow; y < clampedEndRow; y++) {
       for (let x = clampedStartCol; x < clampedEndCol; x++) {
-        const screenX = x * tileSize - offset.x;
-        const screenY = y * tileSize - offset.y;
+        const screenX = (x * tileSize - offset.x) * zoom;
+        const screenY = (y * tileSize - offset.y) * zoom;
 
         if (this.navigationGrid.isBlocked(x, y)) {
           ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
-          ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
         } else {
           ctx.fillStyle = 'rgba(0, 255, 0, 0.05)';
-          ctx.fillRect(screenX, screenY, tileSize, tileSize);
+          ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
         }
       }
     }
@@ -603,6 +608,7 @@ export class Game {
       this.camera.clampToMap();
       const camOffset = this.camera.getOffset();
       this.worldRenderer.setOffset(camOffset.x, camOffset.y);
+      this.worldRenderer.setZoom(this.camera.getZoom());
     }
   }
 
