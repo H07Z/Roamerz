@@ -1,9 +1,10 @@
 /**
- * NPC - Phase 7 Pathfinding
- * Implements navigation/pathfinding with A*
+ * NPC - Phase 8 Homes & Buildings
+ * Implements navigation/pathfinding with A* + home building integration
  * - Receives START and DESTINATION
  * - Find Path → Validate → Follow → Reach
  * - Handles NO PATH, stuck detection, recalculation limiting
+ * - Phase 8: Homes, goHome, AT_HOME, INSIDE, building occupancy
  */
 
 import { WorldMap } from '../world/WorldMap';
@@ -11,6 +12,7 @@ import { WorldRenderer } from '../world/WorldRenderer';
 import { CollisionSystem } from '../collision/CollisionSystem';
 import { Pathfinder } from '../pathfinding/Pathfinder';
 import { Path, PathNode, PathStatus } from '../pathfinding/Path';
+import { Building } from '../building/Building';
 
 export enum NPCState {
   IDLE = 'IDLE',
@@ -18,7 +20,10 @@ export enum NPCState {
   PATHFINDING = 'PATHFINDING',
   FOLLOWING_PATH = 'FOLLOWING_PATH',
   WAITING = 'WAITING',
-  STUCK = 'STUCK'
+  STUCK = 'STUCK',
+  GOING_HOME = 'GOING_HOME',
+  AT_HOME = 'AT_HOME',
+  INSIDE = 'INSIDE'
 }
 
 export enum NPCDirection {
@@ -92,11 +97,20 @@ export class NPC {
   private pathFailedWaitDuration: number = 3; // wait 3 sec before retry on failure
   private pathStatus: PathStatus | null = null;
 
+  // Phase 8: Building / Home integration
+  private homeBuilding: Building | null = null;
+  private atHomeTimer: number = 0;
+  private atHomeDuration: number = 3; // seconds to stay at home before leaving
+  private insideTimer: number = 0;
+  private insideDuration: number = 5; // seconds inside
+  private goingHome: boolean = false;
+
   // For debug
   private totalDistanceTraveled: number = 0;
   private pathRequests: number = 0;
   private pathsFound: number = 0;
   private pathsFailed: number = 0;
+  private homeVisits: number = 0;
 
   constructor(data: NPCData, pointA: NPCPoint, pointB: NPCPoint) {
     this.id = data.id;
@@ -120,6 +134,73 @@ export class NPC {
 
   setPathfinder(pathfinder: Pathfinder): void {
     this.pathfinder = pathfinder;
+  }
+
+  // Phase 8: Home building
+  setHomeBuilding(building: Building | null): void {
+    this.homeBuilding = building;
+  }
+
+  getHomeBuilding(): Building | null {
+    return this.homeBuilding;
+  }
+
+  getHomeId(): string | undefined {
+    return this.homeId;
+  }
+
+  goHome(): boolean {
+    if (!this.homeBuilding) {
+      console.warn(`[NPC] ${this.id} has no home building to go home`);
+      return false;
+    }
+
+    const front = this.homeBuilding.getFrontOfDoorPosition();
+    const door = this.homeBuilding.door;
+
+    // Try to go to front of door first (more natural), fallback to door tile
+    this.goingHome = true;
+    this.state = NPCState.GOING_HOME;
+
+    // Request path to front of door
+    const success = this.requestPath({ x: front.tileX, y: front.tileY });
+    if (!success) {
+      // Fallback to door tile itself
+      console.log(`[NPC] ${this.id} failed to path to front of home ${this.homeBuilding.id}, trying door tile`);
+      return this.requestPath({ x: door.x, y: door.y });
+    }
+
+    console.log(`[NPC] ${this.id} going home to ${this.homeBuilding.id} at ${front.tileX},${front.tileY} (front of door)`);
+    return success;
+  }
+
+  isAtHome(): boolean {
+    if (!this.homeBuilding) return false;
+    const front = this.homeBuilding.getFrontOfDoorPosition();
+    const tilePos = this.getTilePosition();
+    // Check if at front or at door
+    return (tilePos.x === front.tileX && tilePos.y === front.tileY) ||
+           (tilePos.x === this.homeBuilding.door.x && tilePos.y === this.homeBuilding.door.y);
+  }
+
+  enterHome(): void {
+    if (!this.homeBuilding) return;
+    this.state = NPCState.INSIDE;
+    this.insideTimer = 0;
+    this.homeBuilding.setOccupied(true, this.id);
+    this.homeVisits++;
+    console.log(`[NPC] ${this.id} entered home ${this.homeBuilding.id} (visits: ${this.homeVisits})`);
+  }
+
+  leaveHome(): void {
+    if (this.homeBuilding) {
+      this.homeBuilding.setOccupied(false, null);
+    }
+    this.state = NPCState.IDLE;
+    this.idleTimer = 0;
+    this.goingHome = false;
+    console.log(`[NPC] ${this.id} left home ${this.homeBuilding?.id}`);
+    this.switchToAlternativeTarget();
   }
 
   /**
@@ -183,6 +264,25 @@ export class NPC {
       this.recalculationCooldown -= deltaTime;
     }
 
+    // Phase 8: Handle AT_HOME state
+    if (this.state === NPCState.AT_HOME) {
+      this.atHomeTimer += deltaTime;
+      if (this.atHomeTimer >= this.atHomeDuration) {
+        // Enter inside
+        this.enterHome();
+      }
+      return;
+    }
+
+    // Phase 8: Handle INSIDE state
+    if (this.state === NPCState.INSIDE) {
+      this.insideTimer += deltaTime;
+      if (this.insideTimer >= this.insideDuration) {
+        this.leaveHome();
+      }
+      return;
+    }
+
     // Handle path failure waiting
     if (this.state === NPCState.WAITING) {
       this.pathFailedTimer += deltaTime;
@@ -232,12 +332,18 @@ export class NPC {
       this.idleTimer += deltaTime;
       if (this.idleTimer >= this.idleDuration) {
         this.idleTimer = 0;
-        this.switchToAlternativeTarget();
+        // Phase 8: Occasionally go home (30% chance if has home)
+        if (this.homeBuilding && Math.random() < 0.3) {
+          this.goHome();
+        } else {
+          this.switchToAlternativeTarget();
+        }
       }
       return;
     }
 
-    if (this.state === NPCState.FOLLOWING_PATH) {
+    // Phase 8: GOING_HOME is similar to FOLLOWING_PATH but with home logic
+    if (this.state === NPCState.GOING_HOME || this.state === NPCState.FOLLOWING_PATH) {
       if (!this.path || this.path.isFailed()) {
         console.warn(`[NPC] ${this.id} following but no valid path`);
         this.state = NPCState.WAITING;
@@ -313,8 +419,15 @@ export class NPC {
 
     const currentNode = this.path.getCurrentNode();
     if (!currentNode) {
-      this.state = NPCState.IDLE;
-      this.idleTimer = 0;
+      // Reached end of path but no node - handle home logic
+      if (this.goingHome && this.homeBuilding) {
+        this.state = NPCState.AT_HOME;
+        this.atHomeTimer = 0;
+        console.log(`[NPC] ${this.id} arrived home ${this.homeBuilding.id}`);
+      } else {
+        this.state = NPCState.IDLE;
+        this.idleTimer = 0;
+      }
       console.log(`[NPC] ${this.id} reached destination`);
       return;
     }
@@ -334,10 +447,20 @@ export class NPC {
         // Reached final destination
         this.x = targetWorldX;
         this.y = targetWorldY;
-        this.state = NPCState.IDLE;
-        this.idleTimer = 0;
+
+        // Phase 8: Check if this was going home
+        if (this.goingHome && this.homeBuilding) {
+          this.state = NPCState.AT_HOME;
+          this.atHomeTimer = 0;
+          console.log(`[NPC] ${this.id} reached home ${this.homeBuilding.id} at ${currentNode.x},${currentNode.y}`);
+        } else {
+          this.state = NPCState.IDLE;
+          this.idleTimer = 0;
+          this.goingHome = false;
+          console.log(`[NPC] ${this.id} reached final destination ${currentNode.x},${currentNode.y}`);
+        }
+
         this.path = null;
-        console.log(`[NPC] ${this.id} reached final destination ${currentNode.x},${currentNode.y}`);
       } else {
         this.path.advance();
       }
@@ -426,13 +549,16 @@ export class NPC {
     return this.startTile;
   }
 
-  getStats(): { requests: number; found: number; failed: number; distance: number; recalculations: number } {
+  getStats(): { requests: number; found: number; failed: number; distance: number; recalculations: number; homeVisits: number; isAtHome: boolean; hasHome: boolean } {
     return {
       requests: this.pathRequests,
       found: this.pathsFound,
       failed: this.pathsFailed,
       distance: this.totalDistanceTraveled,
-      recalculations: this.recalculationAttempts
+      recalculations: this.recalculationAttempts,
+      homeVisits: this.homeVisits,
+      isAtHome: this.state === NPCState.AT_HOME || this.state === NPCState.INSIDE,
+      hasHome: this.homeBuilding !== null
     };
   }
 

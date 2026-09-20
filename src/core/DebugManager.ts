@@ -1,5 +1,5 @@
 /**
- * DebugManager - Phase 7 Pathfinding
+ * DebugManager - Phase 8 Homes & Buildings
  */
 
 export interface MapDebugInfo {
@@ -59,7 +59,28 @@ export interface NPCPathDebugInfo {
   status: string;
   destination: { x: number; y: number } | null;
   start: { x: number; y: number } | null;
-  stats: { requests: number; found: number; failed: number; distance: number; recalculations: number };
+  stats: { requests: number; found: number; failed: number; distance: number; recalculations: number; homeVisits: number; isAtHome: boolean; hasHome: boolean };
+}
+
+export interface BuildingDebugInfo {
+  counts: { total: number; residential: number; withInterior: number; byType: Record<string, number> };
+  showDoors: boolean;
+  showLabels: boolean;
+  showOwnership: boolean;
+  showFronts: boolean;
+}
+
+export interface BuildingDetailInfo {
+  id: string;
+  name: string;
+  type: number;
+  x: number;
+  y: number;
+  doorX: number;
+  doorY: number;
+  ownerId: string | null;
+  occupied: boolean;
+  occupantId: string | null;
 }
 
 export class DebugManager {
@@ -88,7 +109,9 @@ export class DebugManager {
   private npcInfo: NPCDebugInfo | null = null;
   private pathfindingInfo: PathfindingDebugInfo | null = null;
   private npcPathInfo: NPCPathDebugInfo[] = [];
-  private currentPhase: string = '7';
+  private buildingInfo: BuildingDebugInfo | null = null;
+  private buildingDetails: BuildingDetailInfo[] = [];
+  private currentPhase: string = '8';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -126,6 +149,8 @@ export class DebugManager {
   setNPCInfo(info: NPCDebugInfo): void { this.npcInfo = info; }
   setPathfindingInfo(info: PathfindingDebugInfo): void { this.pathfindingInfo = info; }
   setNPCPathInfo(info: NPCPathDebugInfo[]): void { this.npcPathInfo = info; }
+  setBuildingInfo(info: BuildingDebugInfo): void { this.buildingInfo = info; }
+  setBuildingDetails(details: BuildingDetailInfo[]): void { this.buildingDetails = details; }
 
   getFps(): number { return this.fps; }
 
@@ -145,15 +170,17 @@ export class DebugManager {
 
     const padding = 10;
     const lineHeight = 11;
-    const boxWidth = 420;
+    const boxWidth = 460;
     const baseHeight = 60;
     const mapHeight = this.mapInfo ? 25 : 0;
     const playerHeight = this.playerInfo ? 35 : 0;
     const cameraHeight = this.cameraInfo ? 25 : 0;
-    const pathfindingHeight = this.pathfindingInfo ? 50 : 0;
+    const pathfindingHeight = this.pathfindingInfo ? 35 : 0;
+    const buildingHeight = this.buildingInfo ? 35 : 0;
     const npcHeight = this.npcInfo ? Math.min(120, this.npcInfo.count * lineHeight + 15) : 0;
-    const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(100, this.npcPathInfo.length * lineHeight + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + playerHeight + cameraHeight + pathfindingHeight + npcHeight + npcPathHeight + 20;
+    const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
+    const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(100, this.buildingDetails.length * lineHeight + 15) : 0;
+    const boxHeight = baseHeight + mapHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + npcHeight + npcPathHeight + buildingDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -193,6 +220,14 @@ export class DebugManager {
       ctx.fillStyle = '#ddd';
     }
 
+    if (this.buildingInfo) {
+      ctx.fillStyle = '#8f8';
+      const c = this.buildingInfo.counts;
+      ctx.fillText(`BUILDINGS: Total:${c.total} Res:${c.residential} Interior:${c.withInterior} | Doors:${this.buildingInfo.showDoors?'ON':'OFF'}(J) Labels:${this.buildingInfo.showLabels?'ON':'OFF'}(L) Own:${this.buildingInfo.showOwnership?'ON':'OFF'}(U) Front:${this.buildingInfo.showFronts?'ON':'OFF'}(I)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
     if (this.npcInfo) {
       ctx.fillStyle = '#8f8';
       ctx.fillText(`NPCS (${this.npcInfo.count}):`, x, y);
@@ -210,9 +245,23 @@ export class DebugManager {
       y += lineHeight;
       ctx.fillStyle = '#ddd';
       for (const p of this.npcPathInfo) {
-        const statusColor = p.status === 'FOUND' || p.status === 'FOLLOWING' ? '#8ff' : '#f88';
+        const statusColor = p.status === 'FOUND' || p.status === 'FOLLOWING' ? '#8ff' : p.status.includes('HOME') || p.status === 'AT_HOME' || p.status === 'INSIDE' ? '#fa8' : '#f88';
         ctx.fillStyle = statusColor;
-        ctx.fillText(`${p.id} ${p.status} Len:${p.pathLength} Cur:${p.currentNode}/${p.pathLength} Dest:${p.destination?.x},${p.destination?.y} Req:${p.stats.requests} Found:${p.stats.found} Fail:${p.stats.failed} Recalc:${p.stats.recalculations}`, x, y);
+        ctx.fillText(`${p.id} ${p.status} Len:${p.pathLength} Cur:${p.currentNode}/${p.pathLength} Dest:${p.destination?.x},${p.destination?.y} H:${p.stats.homeVisits} ${p.stats.isAtHome?'AT_HOME':''}`, x, y);
+        y += lineHeight;
+        ctx.fillStyle = '#ddd';
+      }
+    }
+
+    if (this.buildingDetails.length > 0) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`BUILDING DETAILS:`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+      for (const b of this.buildingDetails) {
+        const occupiedColor = b.occupied ? '#8f8' : '#aaa';
+        ctx.fillStyle = occupiedColor;
+        ctx.fillText(`${b.id} ${b.name} ${b.x},${b.y} door ${b.doorX},${b.doorY} owner ${b.ownerId ?? 'none'} ${b.occupied ? `OCCUPIED by ${b.occupantId}` : ''}`, x, y);
         y += lineHeight;
         ctx.fillStyle = '#ddd';
       }
@@ -243,7 +292,7 @@ export class DebugManager {
     ctx.fillText('ROAMERZ', canvasWidth / 2, canvasHeight / 2 - 20);
     ctx.font = '11px monospace';
     ctx.fillStyle = 'rgba(180,255,180,0.8)';
-    ctx.fillText(`Phase 7 - NPC Pathfinding A*`, canvasWidth / 2, canvasHeight / 2);
+    ctx.fillText(`Phase 8 - NPC Homes & Buildings`, canvasWidth / 2, canvasHeight / 2);
     ctx.restore();
   }
 }

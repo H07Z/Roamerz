@@ -1,6 +1,6 @@
 /**
- * NPCRenderer - Phase 7 Pathfinding
- * Renders NPCs and debug path visualization with nodes
+ * NPCRenderer - Phase 8 Homes & Buildings
+ * Renders NPCs and debug path visualization with nodes + home indicators
  */
 
 import { NPC, NPCState } from './NPC';
@@ -15,7 +15,7 @@ export class NPCRenderer {
 
   update(deltaTime: number, npcs: NPC[]): void {
     for (const npc of npcs) {
-      if (npc.state === NPCState.WALK || npc.state === NPCState.FOLLOWING_PATH) {
+      if (npc.state === NPCState.WALK || npc.state === NPCState.FOLLOWING_PATH || npc.state === NPCState.GOING_HOME) {
         const current = this.walkAnimTime.get(npc.id) ?? 0;
         this.walkAnimTime.set(npc.id, current + deltaTime * 8);
       }
@@ -83,15 +83,27 @@ export class NPCRenderer {
     ctx.arc(x + dirOffset.x * s, y - 8 * s + bobOffset + dirOffset.y * s, 2 * s, 0, Math.PI * 2);
     ctx.fill();
 
-    // State color: IDLE green, WALK/FOLLOWING yellow, PATHFINDING blue, WAITING/STUCK red
+    // State color: IDLE green, WALK/FOLLOWING yellow, PATHFINDING blue, WAITING/STUCK red, GOING_HOME purple, AT_HOME orange, INSIDE dark
     let stateColor = '#8f8';
     if (npc.state === NPCState.WALK || npc.state === NPCState.FOLLOWING_PATH) stateColor = '#ff8';
     else if (npc.state === NPCState.PATHFINDING) stateColor = '#88f';
     else if (npc.state === NPCState.WAITING || npc.state === NPCState.STUCK) stateColor = '#f88';
+    else if (npc.state === NPCState.GOING_HOME) stateColor = '#f8f';
+    else if (npc.state === NPCState.AT_HOME) stateColor = '#fa8';
+    else if (npc.state === NPCState.INSIDE) stateColor = '#888';
     ctx.fillStyle = stateColor;
     ctx.beginPath();
     ctx.arc(x + 9 * s, y - 12 * s + bobOffset, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
+
+    // Home indicator if has home
+    const home = npc.getHomeBuilding();
+    if (home) {
+      ctx.fillStyle = home.getIsOccupied() && home.getOccupantId() === npc.id ? '#8f8' : 'rgba(255,255,100,0.6)';
+      ctx.font = `${7 * s}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`⌂ ${home.id}`, x, y - 28 * s + bobOffset);
+    }
 
     // Name
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -106,12 +118,26 @@ export class NPCRenderer {
     ctx.font = `${7 * s}px monospace`;
     ctx.fillText(npc.id, x, y + 30 * s);
 
-    // Path status
+    // Path status + home visits
     const path = npc.getPath();
+    const stats = npc.getStats();
     if (path) {
       ctx.fillStyle = path.isFound() ? '#8f8' : '#f88';
       ctx.font = `${7 * s}px monospace`;
-      ctx.fillText(`${path.status} ${path.getLength()}`, x, y + 38 * s);
+      ctx.fillText(`${path.status} ${path.getLength()} H:${stats.homeVisits}`, x, y + 38 * s);
+    } else {
+      ctx.fillStyle = '#aaa';
+      ctx.font = `${7 * s}px monospace`;
+      ctx.fillText(`H:${stats.homeVisits} ${npc.state}`, x, y + 38 * s);
+    }
+
+    // If INSIDE, show dimmed and house icon
+    if (npc.state === NPCState.INSIDE) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(x - 12 * s, y - 18 * s, 24 * s, 30 * s);
+      ctx.fillStyle = '#fff';
+      ctx.font = `${12 * s}px monospace`;
+      ctx.fillText('⌂', x, y - 2 * s);
     }
 
     ctx.restore();

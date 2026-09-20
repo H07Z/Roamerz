@@ -1,6 +1,6 @@
 /**
- * NPCManager - Phase 7 Pathfinding
- * Manages NPCs with pathfinding, navigation grid, pathfinder
+ * NPCManager - Phase 8 Homes & Buildings
+ * Manages NPCs with pathfinding, navigation grid, pathfinder, and home buildings
  */
 
 import { NPC, NPCData, NPCPoint } from './NPC';
@@ -10,16 +10,24 @@ import { WorldRenderer } from '../world/WorldRenderer';
 import { NavigationGrid } from '../pathfinding/NavigationGrid';
 import { Pathfinder } from '../pathfinding/Pathfinder';
 import { CollisionMap } from '../collision/CollisionMap';
+import { BuildingManager } from '../building/BuildingManager';
 
 export class NPCManager {
   private npcs: Map<string, NPC> = new Map();
   private navigationGrid: NavigationGrid | null = null;
   private pathfinder: Pathfinder | null = null;
+  private buildingManager: BuildingManager | null = null;
 
   constructor() {}
 
-  initialize(worldMap: WorldMap | null, collisionMap: CollisionMap | null = null, navigationGrid: NavigationGrid | null = null, pathfinder: Pathfinder | null = null): void {
-    console.log('[NPCManager] Initializing Phase 7 - NPC Pathfinding...');
+  initialize(
+    worldMap: WorldMap | null,
+    collisionMap: CollisionMap | null = null,
+    navigationGrid: NavigationGrid | null = null,
+    pathfinder: Pathfinder | null = null,
+    buildingManager: BuildingManager | null = null
+  ): void {
+    console.log('[NPCManager] Initializing Phase 8 - Homes & Buildings...');
 
     this.npcs.clear();
 
@@ -44,6 +52,9 @@ export class NPCManager {
       }
       this.pathfinder.setRecalculationCooldown(2000);
     }
+
+    // Phase 8: Building manager
+    this.buildingManager = buildingManager;
 
     const tileSize = WorldRenderer.TILE_SIZE;
 
@@ -131,18 +142,53 @@ export class NPCManager {
       const npc = new NPC(def.data, def.pointA, def.pointB);
       if (this.pathfinder) {
         npc.setPathfinder(this.pathfinder);
+      }
+
+      // Phase 8: Link home building
+      if (this.buildingManager && def.data.homeId) {
+        const homeBuilding = this.buildingManager.getBuilding(def.data.homeId);
+        if (homeBuilding) {
+          npc.setHomeBuilding(homeBuilding);
+          console.log(`[NPCManager] ${npc.id} home linked to ${homeBuilding.id} at door ${homeBuilding.door.x},${homeBuilding.door.y}`);
+        } else {
+          console.warn(`[NPCManager] ${npc.id} home ${def.data.homeId} not found in BuildingManager`);
+        }
+      }
+
+      if (this.pathfinder) {
         // Immediately request path to B for testing
         const tileB = { x: Math.floor(def.pointB.x / tileSize), y: Math.floor(def.pointB.y / tileSize) };
         npc.requestPath(tileB);
       }
+
       this.npcs.set(npc.id, npc);
-      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed} path to ${def.pointB.x.toFixed(0)},${def.pointB.y.toFixed(0)}`);
+      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed} home=${def.data.homeId} path to ${def.pointB.x.toFixed(0)},${def.pointB.y.toFixed(0)}`);
     }
 
-    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs with pathfinding`);
+    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs with pathfinding and homes`);
     if (this.navigationGrid) {
       console.log(`[NPCManager] Navigation grid:`, this.navigationGrid.getCounts());
     }
+    if (this.buildingManager) {
+      console.log(`[NPCManager] Building manager:`, this.buildingManager.getCounts());
+    }
+  }
+
+  setBuildingManager(buildingManager: BuildingManager): void {
+    this.buildingManager = buildingManager;
+    // Update all NPCs with their home buildings
+    for (const npc of this.npcs.values()) {
+      if (npc.getHomeId()) {
+        const home = buildingManager.getBuilding(npc.getHomeId()!);
+        if (home) {
+          npc.setHomeBuilding(home);
+        }
+      }
+    }
+  }
+
+  getBuildingManager(): BuildingManager | null {
+    return this.buildingManager;
   }
 
   setPathfinder(pathfinder: Pathfinder): void {

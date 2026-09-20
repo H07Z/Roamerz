@@ -1,9 +1,9 @@
 /**
- * Game - Phase 7 NPC Pathfinding
- * - A* pathfinding, navigation grid separate from visual
- * - Path request, validation, follow, failure handling
- * - Stuck detection, recalculation limiting
- * - Debug path view
+ * Game - Phase 8 NPC Homes & Buildings
+ * - Buildings with doors, owners, types, interiors
+ * - NPC homes linked, goHome, AT_HOME, INSIDE states
+ * - Building rendering with doors, labels, ownership
+ * - Debug building view
  */
 
 import { Renderer } from './Renderer';
@@ -19,6 +19,8 @@ import { NPCManager } from '../npc/NPCManager';
 import { NPCRenderer } from '../npc/NPCRenderer';
 import { NavigationGrid } from '../pathfinding/NavigationGrid';
 import { Pathfinder } from '../pathfinding/Pathfinder';
+import { BuildingManager } from '../building/BuildingManager';
+import { BuildingRenderer } from '../building/BuildingRenderer';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -35,6 +37,8 @@ export class Game {
   private npcRenderer: NPCRenderer;
   private navigationGrid: NavigationGrid | null = null;
   private pathfinder: Pathfinder | null = null;
+  private buildingManager: BuildingManager;
+  private buildingRenderer: BuildingRenderer;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -45,8 +49,12 @@ export class Game {
   private boundResizeHandler: () => void;
 
   private showHelp: boolean = true;
-  private showNPCPaths: boolean = true; // Phase 7: show paths by default
+  private showNPCPaths: boolean = true;
   private showNavigationGrid: boolean = false;
+  private showBuildingDoors: boolean = true;
+  private showBuildingLabels: boolean = false;
+  private showBuildingOwnership: boolean = false;
+  private showBuildingFronts: boolean = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -60,12 +68,14 @@ export class Game {
     this.camera = new Camera({ smoothing: 5.0, zoom: 1.0, deadZone: 0 });
     this.npcManager = new NPCManager();
     this.npcRenderer = new NPCRenderer();
+    this.buildingManager = new BuildingManager();
+    this.buildingRenderer = new BuildingRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 7 - NPC Pathfinding (A*)...');
+    console.log('[Game] Initializing Phase 8 - NPC Homes & Buildings...');
 
     this.input.initialize(this.canvas);
 
@@ -80,20 +90,29 @@ export class Game {
         const collisionMap = this.collisionSystem.getCollisionMap();
         console.log(`[Game] Collision:`, collisionMap?.getCounts());
 
-        // Navigation Grid separate from visual (Phase 7)
+        // Navigation Grid separate from visual
         if (collisionMap) {
           this.navigationGrid = NavigationGrid.fromCollisionMap(collisionMap);
         } else {
           this.navigationGrid = NavigationGrid.fromWorldMap(map);
         }
         console.log(`[Game] NavigationGrid:`, this.navigationGrid.getCounts());
-        console.log(`[Game] NavigationGrid: 0=Walkable, 1=Blocked (separate from visual)`);
 
         // Pathfinder with A*
-        this.pathfinder = new Pathfinder(false); // 4-dir for reliability
+        this.pathfinder = new Pathfinder(false);
         this.pathfinder.setNavigationGrid(this.navigationGrid);
         this.pathfinder.setRecalculationCooldown(2000);
         console.log(`[Game] Pathfinder: A* with 4-dir, cooldown 2000ms`);
+
+        // Buildings (Phase 8)
+        this.buildingManager.initialize(map);
+        console.log(`[Game] Buildings:`, this.buildingManager.getCounts());
+        const validation = this.buildingManager.validate();
+        if (!validation.valid) {
+          console.warn('[Game] Building validation errors:', validation.errors);
+        } else {
+          console.log('[Game] Building validation PASS');
+        }
 
         this.camera.setWorldMap(map);
 
@@ -102,11 +121,11 @@ export class Game {
         const startY = 20 * tileSize + tileSize / 2;
         this.player = new Player(startX, startY, 150);
 
-        // NPCs with pathfinding
-        this.npcManager.initialize(map, collisionMap, this.navigationGrid, this.pathfinder);
-        console.log(`[Game] NPCs: ${this.npcManager.getCount()} with pathfinding`);
+        // NPCs with pathfinding and homes
+        this.npcManager.initialize(map, collisionMap, this.navigationGrid, this.pathfinder, this.buildingManager);
+        console.log(`[Game] NPCs: ${this.npcManager.getCount()} with pathfinding and homes`);
 
-        console.log(`[Game] Phase 7: A* pathfinding, path request START→DEST, validation, stuck detection, debug view`);
+        console.log(`[Game] Phase 8: Homes & Buildings - doors, owners, goHome, AT_HOME, INSIDE, occupancy`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -251,6 +270,32 @@ export class Game {
         });
         this.debug.setNPCPathInfo(npcPaths);
       }
+
+      // Building debug (Phase 8)
+      if (this.buildingManager) {
+        const counts = this.buildingManager.getCounts();
+        this.debug.setBuildingInfo({
+          counts,
+          showDoors: this.showBuildingDoors,
+          showLabels: this.showBuildingLabels,
+          showOwnership: this.showBuildingOwnership,
+          showFronts: this.showBuildingFronts
+        });
+
+        const buildingDetails = this.buildingManager.getAllBuildings().map(b => ({
+          id: b.id,
+          name: b.name,
+          type: b.type,
+          x: b.x,
+          y: b.y,
+          doorX: b.door.x,
+          doorY: b.door.y,
+          ownerId: b.ownerId ?? null,
+          occupied: b.getIsOccupied(),
+          occupantId: b.getOccupantId()
+        }));
+        this.debug.setBuildingDetails(buildingDetails);
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -343,21 +388,56 @@ export class Game {
       console.log(`[Pathfinding] Nav grid debug: ${this.showNavigationGrid ? 'ON' : 'OFF'}`);
     }
 
+    // Phase 8: Building debug
+    if (this.input.isKeyJustPressed('j')) {
+      this.showBuildingDoors = !this.showBuildingDoors;
+      console.log(`[Building] Doors debug: ${this.showBuildingDoors ? 'ON' : 'OFF'}`);
+    }
+
+    if (this.input.isKeyJustPressed('l')) {
+      this.showBuildingLabels = !this.showBuildingLabels;
+      console.log(`[Building] Labels debug: ${this.showBuildingLabels ? 'ON' : 'OFF'}`);
+    }
+
+    if (this.input.isKeyJustPressed('u')) {
+      this.showBuildingOwnership = !this.showBuildingOwnership;
+      console.log(`[Building] Ownership debug: ${this.showBuildingOwnership ? 'ON' : 'OFF'}`);
+    }
+
+    if (this.input.isKeyJustPressed('i')) {
+      this.showBuildingFronts = !this.showBuildingFronts;
+      console.log(`[Building] Front-of-door debug: ${this.showBuildingFronts ? 'ON' : 'OFF'}`);
+    }
+
+    if (this.input.isKeyJustPressed('y')) {
+      // Test Phase 8: All NPCs go home
+      console.log('[Phase8 Test] All NPCs go home');
+      for (const npc of this.npcManager.getAllNPCs()) {
+        npc.goHome();
+      }
+    }
+
     if (this.input.isKeyJustPressed('p')) {
-      console.log('[NPC] States and Paths:');
+      console.log('[NPC] States and Paths and Homes:');
       for (const npc of this.npcManager.getAllNPCs()) {
         const path = npc.getPath();
-        console.log(`  ${npc.id} ${npc.name} ${npc.state} at ${npc.getTilePosition().x},${npc.getTilePosition().y} -> dest ${npc.getDestinationTile()?.x},${npc.getDestinationTile()?.y} pathLen ${path?.getLength()??0} status ${path?.status}`);
+        const home = npc.getHomeBuilding();
+        console.log(`  ${npc.id} ${npc.name} ${npc.state} at ${npc.getTilePosition().x},${npc.getTilePosition().y} -> dest ${npc.getDestinationTile()?.x},${npc.getDestinationTile()?.y} pathLen ${path?.getLength()??0} status ${path?.status} home ${home?.id} door ${home?.door.x},${home?.door.y} visits ${npc.getStats().homeVisits}`);
       }
       if (this.pathfinder) {
         console.log('[Pathfinder] Stats:', this.pathfinder.getStats());
+      }
+      console.log('[Buildings]:', this.buildingManager.getCounts());
+      for (const b of this.buildingManager.getAllBuildings()) {
+        console.log(`  ${b.id} ${b.name} ${b.x},${b.y} ${b.width}x${b.height} door ${b.door.x},${b.door.y} owner ${b.ownerId} occupied ${b.getIsOccupied()} occupant ${b.getOccupantId()}`);
       }
     }
 
     // Phase 7 Tests - hotkeys for testing pathfinding scenarios
     if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7 Test] Running pathfinding tests...');
+      console.log('[Phase7+8 Test] Running pathfinding and building tests...');
       this.runPhase7Tests();
+      this.runPhase8Tests();
     }
 
     if (this.input.isKeyJustPressed('o')) {
@@ -378,7 +458,6 @@ export class Game {
 
     // Phase 7: Request NPC to specific destinations for testing
     if (this.input.isKeyJustPressed('5')) {
-      // Test1: nearby destination
       const npc = this.npcManager.getNPC('NPC001');
       if (npc) {
         const tile = npc.getTilePosition();
@@ -387,37 +466,50 @@ export class Game {
       }
     }
     if (this.input.isKeyJustPressed('6')) {
-      // Test2: around building
       const npc = this.npcManager.getNPC('NPC002');
       if (npc) {
-        npc.requestPath({ x: 10, y: 10 }); // around house
+        npc.requestPath({ x: 10, y: 10 });
         console.log(`[Test2] NPC002 around building to 10,10`);
       }
     }
     if (this.input.isKeyJustPressed('7')) {
-      // Test3: across bridge
       const npc = this.npcManager.getNPC('NPC003');
       if (npc) {
-        npc.requestPath({ x: 42, y: 19 }); // across river via bridge
+        npc.requestPath({ x: 42, y: 19 });
         console.log(`[Test3] NPC003 across bridge to 42,19`);
       }
     }
     if (this.input.isKeyJustPressed('8')) {
-      // Test4: blocked destination
       const npc = this.npcManager.getNPC('NPC004');
       if (npc) {
-        npc.requestPath({ x: 38, y: 10 }); // water
+        npc.requestPath({ x: 38, y: 10 });
         console.log(`[Test4] NPC004 blocked destination water 38,10`);
       }
     }
     if (this.input.isKeyJustPressed('9')) {
-      // Test5: no possible path (surrounded by blocked)
       const npc = this.npcManager.getNPC('NPC005');
       if (npc) {
-        // Find a location surrounded by water/houses if possible, or use 0,0 which is tree
         npc.requestPath({ x: 0, y: 0 });
         console.log(`[Test5] NPC005 no path to 0,0 (tree border)`);
       }
+    }
+
+    // Phase 8: NPC go home tests (F1-F5 for NPC1-5)
+    if (this.input.isKeyJustPressed('f5')) {
+      const npc = this.npcManager.getNPC('NPC001');
+      if (npc) npc.goHome();
+    }
+    if (this.input.isKeyJustPressed('f6')) {
+      const npc = this.npcManager.getNPC('NPC002');
+      if (npc) npc.goHome();
+    }
+    if (this.input.isKeyJustPressed('f7')) {
+      const npc = this.npcManager.getNPC('NPC003');
+      if (npc) npc.goHome();
+    }
+    if (this.input.isKeyJustPressed('f8')) {
+      const npc = this.npcManager.getNPC('NPC004');
+      if (npc) npc.goHome();
     }
   }
 
@@ -429,30 +521,119 @@ export class Game {
 
     console.log('=== PHASE 7 TESTS ===');
 
-    // Test1: nearby
     let result = this.pathfinder.requestPath({ x: 25, y: 20 }, { x: 27, y: 20 }, 'TEST1');
     console.log(`Test1 nearby: ${result.success ? 'PASS' : 'FAIL'} length=${result.path?.getLength()}`);
 
-    // Test2: around building
     result = this.pathfinder.requestPath({ x: 10, y: 10 }, { x: 18, y: 10 }, 'TEST2');
     console.log(`Test2 around building: ${result.success ? 'PASS' : 'FAIL'} length=${result.path?.getLength()}`);
 
-    // Test3: across bridge
     result = this.pathfinder.requestPath({ x: 24, y: 19 }, { x: 42, y: 19 }, 'TEST3');
     console.log(`Test3 across bridge: ${result.success ? 'PASS' : 'FAIL'} length=${result.path?.getLength()}`);
 
-    // Test4: blocked destination
     result = this.pathfinder.requestPath({ x: 25, y: 20 }, { x: 38, y: 10 }, 'TEST4');
     console.log(`Test4 blocked dest (water): ${!result.success ? 'PASS (correctly no path)' : 'FAIL (should be no path)'} status=${result.path?.status}`);
 
-    // Test5: no possible path
     result = this.pathfinder.requestPath({ x: 25, y: 20 }, { x: 0, y: 0 }, 'TEST5');
     console.log(`Test5 no path (0,0 tree): ${!result.success ? 'PASS' : 'FAIL'} status=${result.path?.status}`);
 
-    // Test7: multiple NPCs simultaneously (already running)
     console.log(`Test7 multiple NPCs: ${this.npcManager.getCount()} NPCs pathfinding simultaneously - PASS if all moving`);
 
-    console.log('=== END TESTS ===');
+    console.log('=== END PHASE 7 TESTS ===');
+  }
+
+  private runPhase8Tests(): void {
+    if (!this.buildingManager) {
+      console.log('No building manager');
+      return;
+    }
+
+    console.log('=== PHASE 8 TESTS ===');
+
+    // Test1: Building counts
+    const counts = this.buildingManager.getCounts();
+    console.log(`Test1 building counts: total=${counts.total} residential=${counts.residential} withInterior=${counts.withInterior} byType=${JSON.stringify(counts.byType)} -> ${counts.total >= 5 ? 'PASS' : 'FAIL'}`);
+
+    // Test2: Each building has door walkable
+    let doorsWalkable = true;
+    for (const b of this.buildingManager.getAllBuildings()) {
+      if (this.navigationGrid) {
+        const walkable = this.navigationGrid.isWalkable(b.door.x, b.door.y);
+        console.log(`  Building ${b.id} door ${b.door.x},${b.door.y} walkable=${walkable}`);
+        if (!walkable) doorsWalkable = false;
+      }
+    }
+    console.log(`Test2 doors walkable: ${doorsWalkable ? 'PASS' : 'FAIL'}`);
+
+    // Test3: Each NPC has home
+    let homesValid = true;
+    for (const npc of this.npcManager.getAllNPCs()) {
+      const home = npc.getHomeBuilding();
+      const hasHome = home !== null;
+      console.log(`  NPC ${npc.id} homeId=${npc.getHomeId()} homeBuilding=${home?.id ?? 'none'} -> ${hasHome ? 'PASS' : 'FAIL'}`);
+      if (!hasHome) homesValid = false;
+    }
+    console.log(`Test3 NPC homes valid: ${homesValid ? 'PASS' : 'FAIL'}`);
+
+    // Test4: Path to home for each NPC
+    let pathsToHome = true;
+    if (this.pathfinder) {
+      for (const npc of this.npcManager.getAllNPCs()) {
+        const home = npc.getHomeBuilding();
+        if (!home) continue;
+        const front = home.getFrontOfDoorPosition();
+        const start = npc.getTilePosition();
+        const result = this.pathfinder.requestPath(start, { x: front.tileX, y: front.tileY }, `HOME_${npc.id}`);
+        console.log(`  Path to home ${npc.id} -> ${home.id} front ${front.tileX},${front.tileY}: ${result.success ? 'PASS' : 'FAIL'} len=${result.path?.getLength()}`);
+        if (!result.success) pathsToHome = false;
+      }
+    }
+    console.log(`Test4 paths to home: ${pathsToHome ? 'PASS' : 'FAIL'}`);
+
+    // Test5: Building validation
+    const validation = this.buildingManager.validate();
+    console.log(`Test5 building validation: ${validation.valid ? 'PASS' : 'FAIL'} errors=${validation.errors.length}`);
+    if (!validation.valid) console.log('  Errors:', validation.errors);
+
+    // Test6: Door tiles are INTERACTABLE in collision map
+    const collisionMap = this.collisionSystem.getCollisionMap();
+    let doorsInteractable = true;
+    if (collisionMap) {
+      for (const b of this.buildingManager.getAllBuildings()) {
+        const type = collisionMap.getCollisionType(b.door.x, b.door.y);
+        // Door should be WALKABLE or INTERACTABLE (not BLOCKED)
+        const isWalkable = type !== null && type !== 1; // 1 = BLOCKED
+        console.log(`  Door ${b.id} ${b.door.x},${b.door.y} collisionType=${type} walkable=${isWalkable}`);
+        if (!isWalkable) doorsInteractable = false;
+      }
+    }
+    console.log(`Test6 doors collision walkable: ${doorsInteractable ? 'PASS' : 'FAIL'}`);
+
+    // Test7: Front-of-door positions walkable
+    let frontsWalkable = true;
+    for (const b of this.buildingManager.getAllBuildings()) {
+      const front = b.getFrontOfDoorPosition();
+      if (this.navigationGrid) {
+        const walkable = this.navigationGrid.isWalkable(front.tileX, front.tileY);
+        console.log(`  Front ${b.id} ${front.tileX},${front.tileY} walkable=${walkable}`);
+        if (!walkable) frontsWalkable = false;
+      }
+    }
+    console.log(`Test7 front-of-door walkable: ${frontsWalkable ? 'PASS' : 'FAIL'}`);
+
+    // Test8: Ownership linkage
+    let ownershipOk = true;
+    for (const b of this.buildingManager.getAllBuildings()) {
+      if (b.ownerId) {
+        const owner = this.npcManager.getNPC(b.ownerId);
+        const ownerExists = owner !== undefined;
+        const ownerHomeMatches = owner?.getHomeBuilding()?.id === b.id;
+        console.log(`  Building ${b.id} owner ${b.ownerId} exists=${ownerExists} homeMatches=${ownerHomeMatches}`);
+        if (!ownerExists || !ownerHomeMatches) ownershipOk = false;
+      }
+    }
+    console.log(`Test8 ownership linkage: ${ownershipOk ? 'PASS' : 'FAIL'}`);
+
+    console.log('=== END PHASE 8 TESTS ===');
   }
 
   private render(): void {
@@ -469,6 +650,21 @@ export class Game {
       // Navigation grid debug
       if (this.showNavigationGrid && this.navigationGrid) {
         this.renderNavigationGridDebug(ctx, w, h);
+      }
+
+      // Buildings (Phase 8) - render doors, labels, etc. after world but before NPCs
+      if (this.buildingManager) {
+        const buildings = this.buildingManager.getAllBuildings();
+        this.buildingRenderer.renderAll(ctx, buildings, this.worldRenderer, this.camera, {
+          showDoors: this.showBuildingDoors,
+          showLabels: this.showBuildingLabels,
+          showOwnership: this.showBuildingOwnership,
+          showBlocked: false
+        });
+
+        if (this.showBuildingFronts) {
+          this.buildingRenderer.renderAllFrontOfDoors(ctx, buildings, this.worldRenderer, this.camera);
+        }
       }
     } else {
       this.renderer.renderBackground();
@@ -538,39 +734,49 @@ export class Game {
     ctx.textBaseline = 'top';
 
     const lines = [
-      'PHASE 7 - NPC PATHFINDING (A*)',
+      'PHASE 8 - NPC HOMES & BUILDINGS',
       'Player: WASD/Arrows move, C center',
       'Camera: Z zoom, X smoothing, V village',
       'Collision: K overlay, 1-4 teleport',
       'Pathfinding:',
       '  N - Toggle NPC paths (● nodes)',
       '  M - Toggle nav grid (red blocked)',
-      '  T - Run all Phase7 tests',
-      '  O - Toggle obstacle at 24,18 (Test6)',
-      '  P - Print NPC path states',
-      'Tests:',
-      '  5 - Test1 nearby dest',
-      '  6 - Test2 around building',
-      '  7 - Test3 across bridge',
-      '  8 - Test4 blocked dest (water)',
-      '  9 - Test5 no path (0,0 tree)',
-      '  Multiple NPCs already (Test7)',
+      'Buildings (Phase 8):',
+      '  J - Toggle doors (⌂ door)',
+      '  L - Toggle building labels',
+      '  U - Toggle ownership',
+      '  I - Toggle front-of-door (yellow)',
+      '  Y - All NPCs go home',
+      '  F5-F8 - NPC1-4 go home',
+      '  T - Run all tests (Phase7+8)',
+      '  O - Toggle obstacle at 24,18',
+      '  P - Print NPC + building states',
+      'Tests Phase7:',
+      '  5 - nearby, 6 - around building',
+      '  7 - across bridge, 8 - blocked dest',
+      '  9 - no path (0,0)',
       'General: G grid, B coords, ` F2 debug',
       'H help, R reset',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} ${this.player.state}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} | Paths: ${this.showNPCPaths?'ON':'OFF'} Nav:${this.showNavigationGrid?'ON':'OFF'}`,
+      `NPCs: ${this.npcManager.getCount()} | Paths:${this.showNPCPaths?'ON':'OFF'} Nav:${this.showNavigationGrid?'ON':'OFF'}`,
+      `Buildings: ${this.buildingManager ? this.buildingManager.getCount() : 0} | Doors:${this.showBuildingDoors?'ON':'OFF'} Labels:${this.showBuildingLabels?'ON':'OFF'} Own:${this.showBuildingOwnership?'ON':'OFF'}`,
       `Pathfinder: ${this.pathfinder ? `${this.pathfinder.getStats().successful}/${this.pathfinder.getStats().total} success` : 'N/A'}`,
       ...this.npcManager.getAllNPCs().map(n => {
         const path = n.getPath();
-        return `${n.id} ${n.state} ${n.getTilePosition().x},${n.getTilePosition().y}->${n.getDestinationTile()?.x},${n.getDestinationTile()?.y} len:${path?.getLength()??0} ${path?.status??''}`;
+        const home = n.getHomeBuilding();
+        const stats = n.getStats();
+        return `${n.id} ${n.state} ${n.getTilePosition().x},${n.getTilePosition().y}->${n.getDestinationTile()?.x},${n.getDestinationTile()?.y} len:${path?.getLength()??0} home:${home?.id} visits:${stats.homeVisits} ${n.state==='INSIDE'?'⌂ INSIDE':''}`;
+      }),
+      ...this.buildingManager.getAllBuildings().map(b => {
+        return `${b.id} ${b.name} ${b.x},${b.y} door ${b.door.x},${b.door.y} owner ${b.ownerId ?? 'none'} ${b.getIsOccupied() ? `OCCUPIED by ${b.getOccupantId()}` : ''}`;
       })
     ];
 
     const padding = 10;
     const lineHeight = 11;
-    const boxWidth = 340;
+    const boxWidth = 380;
     const boxHeight = lines.length * lineHeight + 20;
     const x = screenWidth - boxWidth - padding;
     const y = padding;
@@ -586,7 +792,7 @@ export class Game {
         ctx.fillStyle = '#8f8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#ddd';
-      } else if (line.endsWith(':') || line.startsWith('Pathfinding') || line.startsWith('Tests')) {
+      } else if (line.endsWith(':') || line.startsWith('Pathfinding') || line.startsWith('Buildings') || line.startsWith('Tests')) {
         ctx.fillStyle = '#ff8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#aaa';
@@ -625,5 +831,7 @@ export class Game {
   getNPCRenderer(): NPCRenderer { return this.npcRenderer; }
   getNavigationGrid(): NavigationGrid | null { return this.navigationGrid; }
   getPathfinder(): Pathfinder | null { return this.pathfinder; }
+  getBuildingManager(): BuildingManager { return this.buildingManager; }
+  getBuildingRenderer(): BuildingRenderer { return this.buildingRenderer; }
   isGameRunning(): boolean { return this.isRunning; }
 }
