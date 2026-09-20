@@ -298,8 +298,13 @@ export class Game {
         this.interactionSystem.update(this.player, this.npcManager.getAllNPCs(), this.buildingManager);
       }
 
-      // Dialogue input handling
+      // Dialogue input handling - track if dialogue was open BEFORE handling to prevent same-frame teleport bug
+      // Bug: pressing 1-4 to choose dialogue option ends dialogue, then same key triggers teleport to 3,3
+      const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
       this.handleDialogueInput();
+
+      // Store for debug toggles
+      (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
 
       this.debug.setNPCInfo({
         count: this.npcManager.getCount(),
@@ -528,7 +533,8 @@ export class Game {
       });
     }
 
-    this.handleDebugToggles(deltaTime);
+    // Pass wasDialogueOpenBeforeInput to prevent same-frame teleport after dialogue choice
+    this.handleDebugToggles(deltaTime, (this as any)._wasDialogueOpenBeforeInput);
   }
 
   private handleDialogueInput(): void {
@@ -610,7 +616,9 @@ export class Game {
     }
   }
 
-  private handleDebugToggles(_deltaTime: number): void {
+  private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
+    // If not passed, retrieve from stored value (set in update)
+    const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f1') || this.input.isKeyJustPressed('f3') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
     }
@@ -813,13 +821,15 @@ export class Game {
       }
     }
 
-    // Teleports
-    if (this.input.isKeyJustPressed('1') && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(3*32+16, 3*32+16);
-    if (this.input.isKeyJustPressed('2') && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(38*32+16, 10*32+16);
-    if (this.input.isKeyJustPressed('3') && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(36*32+16, 19*32+16);
-    if (this.input.isKeyJustPressed('4') && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(12*32+16, 10*32+16);
+    // Teleports - FIX: block if dialogue was open before input (prevents 1-4 choice triggering teleport)
+    // Previously: after choosing option 3, dialogue closes same frame, then isKeyJustPressed('3') still true triggers teleport to 3,3 (tree blocked)
+    // Also fixed teleport positions to be walkable (was 3,3 tree, 38,10 water, 12,10 house)
+    if (this.input.isKeyJustPressed('1') && !wasOpen && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(25*32+16, 20*32+16); // Village square center - safe
+    if (this.input.isKeyJustPressed('2') && !wasOpen && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(34*32+16, 14*32+16); // Near shop door road - safe
+    if (this.input.isKeyJustPressed('3') && !wasOpen && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(37*32+16, 19*32+16); // Bridge center - safe
+    if (this.input.isKeyJustPressed('4') && !wasOpen && !this.dialogueManager.isOpen() && this.player) this.player.setPosition(15*32+16, 30*32+16); // Farm road entrance - safe
 
-    if (!this.dialogueManager.isOpen()) {
+    if (!wasOpen && !this.dialogueManager.isOpen()) {
       if (this.input.isKeyJustPressed('5')) {
         const npc = this.npcManager.getNPC('NPC001');
         if (npc) {
