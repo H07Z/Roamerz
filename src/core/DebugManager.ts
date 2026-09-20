@@ -264,6 +264,17 @@ export interface WeatherDebugInfo {
   showWeather: boolean;
 }
 
+export interface EconomyDebugInfo {
+  shopCount: number;
+  shops: string[];
+  totalStock: number;
+  totalTransactions: number;
+  totalSpent: number;
+  totalEarned: number;
+  debug: string;
+  showEconomy: boolean;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -309,7 +320,8 @@ export class DebugManager {
   private craftingInfo: CraftingDebugInfo | null = null;
   private cookingInfo: CookingDebugInfo | null = null;
   private weatherInfo: WeatherDebugInfo | null = null;
-  private currentPhase: string = '19';
+  private economyInfo: EconomyDebugInfo | null = null;
+  private currentPhase: string = '20';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -365,6 +377,7 @@ export class DebugManager {
   setCraftingInfo(info: CraftingDebugInfo): void { this.craftingInfo = info; }
   setCookingInfo(info: CookingDebugInfo): void { this.cookingInfo = info; }
   setWeatherInfo(info: WeatherDebugInfo): void { this.weatherInfo = info; }
+  setEconomyInfo(info: EconomyDebugInfo): void { this.economyInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -405,12 +418,13 @@ export class DebugManager {
     const craftingHeight = this.craftingInfo ? 15 : 0;
     const cookingHeight = this.cookingInfo ? 15 : 0;
     const weatherHeight = this.weatherInfo ? 15 : 0;
+    const economyHeight = this.economyInfo ? 15 : 0;
     const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + economyHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -492,6 +506,13 @@ export class DebugManager {
     if (this.weatherInfo) {
       ctx.fillStyle = '#8af';
       ctx.fillText(`WEATHER: ${this.weatherInfo.weatherCount} ${this.weatherInfo.weathers.slice(0,4).join(',')} | Current:${this.weatherInfo.current} ${(this.weatherInfo.intensity*100).toFixed(0)}% Changes:${this.weatherInfo.totalChanges} | ${this.weatherInfo.debug} Overlay:${this.weatherInfo.showWeather?'ON':'OFF'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.economyInfo) {
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`ECONOMY: Shops ${this.economyInfo.shopCount} ${this.economyInfo.shops.slice(0,3).join(',')} | Stock:${this.economyInfo.totalStock} Tx:${this.economyInfo.totalTransactions} Spent:$${this.economyInfo.totalSpent} Earned:$${this.economyInfo.totalEarned} | ${this.economyInfo.debug} UI:${this.economyInfo.showEconomy?'OPEN':'CLOSED'}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }

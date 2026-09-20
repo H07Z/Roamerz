@@ -51,6 +51,10 @@ export function migrateSaveFile(saveFile: any): SaveFile {
         migratedFile = migrateToV19(migratedFile);
         migrations.push(`Migrated to v19 (Phase 16.4 Weather System)`);
         break;
+      case 20:
+        migratedFile = migrateToV20(migratedFile);
+        migrations.push(`Migrated to v20 (Phase 16.5 Economy / Shop System)`);
+        break;
       default:
         // Generic migration: ensure defaults for unknown future version
         migratedFile = migrateGeneric(migratedFile, nextVersion);
@@ -434,8 +438,49 @@ function migrateToV19(oldSave: any): any {
   };
 }
 
+function migrateToV20(oldSave: any): any {
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+  const oldEconomy = oldSave.world?.economy ?? { shopInventories: {}, prices: {}, transactionHistory: [], totalTransactions: 0, totalSpent: 0, totalEarned: 0, version: 1 };
+
+  const newEconomy = {
+    shopInventories: oldEconomy.shopInventories ?? {},
+    prices: oldEconomy.prices ?? {},
+    transactionHistory: oldEconomy.transactionHistory ?? [],
+    totalTransactions: typeof oldEconomy.totalTransactions === 'number' ? oldEconomy.totalTransactions : (oldEconomy.transactionHistory?.length ?? 0),
+    totalSpent: typeof oldEconomy.totalSpent === 'number' ? oldEconomy.totalSpent : 0,
+    totalEarned: typeof oldEconomy.totalEarned === 'number' ? oldEconomy.totalEarned : 0,
+    version: 1
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 20,
+    gameVersion: oldSave.gameVersion ?? '0.20.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      cooking: oldSave.player?.cooking ?? {},
+      crafting: oldSave.player?.crafting ?? {}
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      economy: newEconomy,
+      weather: oldSave.world?.weather ?? { current: 'sunny', intensity: 0, nextChange: 0, totalChanges: 0, version: 1 },
+      cooking: oldSave.world?.cooking ?? { recipesUnlocked: [], totalCooked: 0, cookedCounts: {}, version: 1 },
+      crafting: oldSave.world?.crafting ?? { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
+      animals: oldSave.world?.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
+      farming: oldSave.world?.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} }
+    },
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 20, gameVersion: oldSave.gameVersion ?? '0.20.0' }
+  };
+}
+
 // For future phases:
-// function migrateToV20(saveFile: any): any { ... }
+// function migrateToV21(saveFile: any): any { ... }
 
 export function getMigrationPath(fromVersion: number, toVersion: number = SAVE_VERSION): number[] {
   const path: number[] = [];

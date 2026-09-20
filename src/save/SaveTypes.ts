@@ -4,8 +4,8 @@
  * Supports future: farming, animals, weather, crafting, combat, dungeons, events, relationships, etc.
  */
 
-export const SAVE_VERSION = 19; // Phase 16.4 - Weather System
-export const SAVE_GAME_VERSION = '0.19.0';
+export const SAVE_VERSION = 20; // Phase 16.5 - Economy / Shop System
+export const SAVE_GAME_VERSION = '0.20.0';
 export const MAX_SAVE_SLOTS = 5;
 export const STORAGE_KEY_PREFIX = 'roamerz_save_';
 export const STORAGE_META_KEY = 'roamerz_save_meta';
@@ -262,6 +262,7 @@ export interface WorldSaveData {
     cookedCounts: Record<string, number>;
     version: number;
   };
+  // Weather System Phase16.4
   weather?: {
     current: string;
     intensity: number;
@@ -269,10 +270,14 @@ export interface WorldSaveData {
     totalChanges?: number;
     version: number;
   };
+  // Economy System Phase16.5
   economy?: {
     shopInventories: Record<string, any>;
     prices: Record<string, number>;
     transactionHistory: any[];
+    totalTransactions?: number;
+    totalSpent?: number;
+    totalEarned?: number;
     version: number;
   };
   dungeons?: Record<string, any>;
@@ -457,8 +462,8 @@ export function createDefaultWorldSaveData(): WorldSaveData {
     animals: { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
     crafting: { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
     cooking: { recipesUnlocked: [], totalCooked: 0, cookedCounts: {}, version: 1 },
-    weather: { current: 'SUNNY', intensity: 0, nextChange: 0, totalChanges: 0, version: 1 },
-    economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
+    weather: { current: 'sunny', intensity: 0, nextChange: 0, totalChanges: 0, version: 1 },
+    economy: { shopInventories: {}, prices: {}, transactionHistory: [], totalTransactions: 0, totalSpent: 0, totalEarned: 0, version: 1 },
     dungeons: {},
     events: {},
     seasons: {}

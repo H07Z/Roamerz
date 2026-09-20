@@ -1,5 +1,5 @@
 /**
- * Game - Phase 16.4 Weather System
+ * Game - Phase 16.5 Economy / Shop System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
@@ -75,6 +75,9 @@ import { CookingCategory } from '../cooking/CookingRecipe';
 import { WeatherDatabase } from '../weather/WeatherDatabase';
 import { WeatherSystem } from '../weather/WeatherSystem';
 import { WeatherRenderer } from '../weather/WeatherRenderer';
+import { ShopDatabase } from '../economy/ShopDatabase';
+import { EconomySystem } from '../economy/EconomySystem';
+import { EconomyRenderer } from '../economy/EconomyRenderer';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -157,6 +160,13 @@ export class Game {
   private weatherRenderer: WeatherRenderer;
   private showWeather: boolean = true;
   private showWeatherDebug: boolean = true;
+
+  // Phase 16.5 Economy / Shop System
+  private economyDatabase: ShopDatabase;
+  private economySystem: EconomySystem;
+  private economyRenderer: EconomyRenderer;
+  private showEconomy: boolean = false;
+  private showEconomyDebug: boolean = true;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -241,12 +251,15 @@ export class Game {
     this.weatherDatabase = WeatherDatabase.getInstance();
     this.weatherSystem = new WeatherSystem(this.weatherDatabase);
     this.weatherRenderer = new WeatherRenderer();
+    this.economyDatabase = ShopDatabase.getInstance();
+    this.economySystem = new EconomySystem(this.economyDatabase);
+    this.economyRenderer = new EconomyRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 16.3 - Cooking System...');
+    console.log('[Game] Initializing Phase 16.5 - Economy / Shop System...');
 
     this.input.initialize(this.canvas);
 
@@ -408,6 +421,18 @@ export class Game {
         console.log(`[Game] WeatherSystem: ${this.weatherSystem.getDebugString()}`);
         this.weatherRenderer.setShowWeather(this.showWeather);
 
+        // Phase 16.5 Economy / Shop System init
+        this.economySystem.initialize();
+        console.log(`[Game] ShopDatabase: ${this.economyDatabase.getCount()} shops: ${this.economyDatabase.getDebugString()}`);
+        const economyValidation = this.economyDatabase.validate();
+        if (!economyValidation.valid) {
+          console.warn('[Game] ShopDatabase validation errors:', economyValidation.errors);
+        } else {
+          console.log('[Game] ShopDatabase validation PASS');
+        }
+        console.log(`[Game] EconomySystem: ${this.economySystem.getDebugString()}`);
+        this.economyRenderer.setShowEconomy(this.showEconomy);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -425,7 +450,8 @@ export class Game {
         console.log(`[Game] Phase 16.2: Crafting System - data-driven recipes, ingredients consumption, result add, categories, persistence`);
         console.log(`[Game] Phase 16.3: Cooking System - data-driven recipes, ingredients consumption, stations, persistence`);
         console.log(`[Game] Phase 16.4: Weather System - data-driven weathers, transitions, visuals, farming auto-water, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 16.5: Economy / Shop System - data-driven shops, buy/sell, prices, transaction history, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, Shift+B economy/shop, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -508,6 +534,7 @@ export class Game {
     const craftingSave = this.craftingSystem.getSaveData();
     const cookingSave = this.cookingSystem.getSaveData();
     const weatherSave = this.weatherSystem.getSaveData();
+    const economySave = this.economySystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -528,7 +555,7 @@ export class Game {
       crafting: craftingSave,
       cooking: cookingSave,
       weather: weatherSave,
-      economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
+      economy: economySave,
       dungeons: {},
       events: {},
       seasons: {}
@@ -646,6 +673,14 @@ export class Game {
         console.log(`[Game] Weather loaded: ${this.weatherSystem.getDebugString()}`);
       }
 
+      if ((saveFile.world as any).economy) {
+        this.economySystem.loadSaveData((saveFile.world as any).economy);
+        console.log(`[Game] Economy loaded: ${this.economySystem.getDebugString()}`);
+      } else if (saveFile.world.economy) {
+        this.economySystem.loadSaveData(saveFile.world.economy);
+        console.log(`[Game] Economy loaded: ${this.economySystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -693,7 +728,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()} weather ${this.weatherSystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()} weather ${this.weatherSystem.getDebugString()} economy ${this.economySystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -815,6 +850,7 @@ export class Game {
     this.craftingSystem.clear();
     this.cookingSystem.clear();
     this.weatherSystem.clear();
+    this.economySystem.clear();
     this.weatherSystem.initialize(this.timeManager.getTotalSeconds());
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
@@ -845,6 +881,8 @@ export class Game {
     this.cookingRenderer.setShowCooking(false);
     this.showWeather = true;
     this.weatherRenderer.setShowWeather(true);
+    this.showEconomy = false;
+    this.economyRenderer.setShowEconomy(false);
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -866,7 +904,8 @@ export class Game {
     const isInventoryOpen = this.showPlayerInventory;
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen) return;
+    const isEconomyOpen = this.showEconomy;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1025,7 +1064,8 @@ export class Game {
     const isInventoryOpen = this.showPlayerInventory;
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen) return;
+    const isEconomyOpen = this.showEconomy;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1118,6 +1158,8 @@ export class Game {
   private handleCraftingInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    const isEconomyOpen = this.showEconomy;
+    if (isEconomyOpen) return;
 
     if (this.showCrafting) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift'))) {
@@ -1222,6 +1264,7 @@ export class Game {
   private handleCookingInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    if (this.showEconomy) return;
 
     if (this.showCooking) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift'))) {
@@ -1342,7 +1385,7 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     // Don't block if inventory/crafting/cooking open? Allow toggle even when those open? For simplicity, allow only when no modal
-    if (isDialogueOpen || isSaveUIOpen) return;
+    if (isDialogueOpen || isSaveUIOpen || this.showEconomy) return;
 
     if (this.input.isKeyJustPressed('w') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       this.showWeather = !this.showWeather;
@@ -1375,6 +1418,152 @@ export class Game {
     }
   }
 
+  // ==================== PHASE 16.5 ECONOMY INPUT ====================
+
+  private handleEconomyInput(): void {
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (this.showEconomy) {
+      if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('b') && this.input.isKeyDown('shift'))) {
+        this.showEconomy = false;
+        this.economyRenderer.setShowEconomy(false);
+        console.log('[Economy] Closed economy UI');
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        const shop = this.economySystem.getAllShops()[this.economyRenderer.getSelectedShopIndex()];
+        if (shop) {
+          const inv = this.economySystem.getShopInventory(shop.id);
+          const count = this.economyRenderer.getBuyMode() ? (inv ? inv.size : 0) : (this.player ? this.player.getInventory().getNonEmptySlots().length : 0);
+          // Use renderer navigate with actual filtered count? Approximate
+          this.economyRenderer.navigate('up', 50);
+        }
+      }
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        this.economyRenderer.navigate('down', 50);
+      }
+      if (this.input.isKeyJustPressed('q') || this.input.isKeyJustPressed('arrowleft')) {
+        this.economyRenderer.navigateShop('left', this.economySystem.getShopCount());
+      }
+      if (this.input.isKeyJustPressed('e') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.economyRenderer.navigateShop('right', this.economySystem.getShopCount());
+      }
+
+      if (this.input.isKeyJustPressed('tab')) {
+        this.economyRenderer.toggleBuyMode();
+        console.log(`[Economy] Mode: ${this.economyRenderer.getBuyMode() ? 'BUY' : 'SELL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('c') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        const categories = [null, 'MATERIAL' as any, 'FOOD' as any, 'TOOL' as any, 'POTION' as any, 'TREASURE' as any, 'SEED' as any, 'MISC' as any];
+        const current = this.economyRenderer.getFilterCategory();
+        const idx = categories.indexOf(current as any);
+        const next = categories[(idx + 1) % categories.length];
+        this.economyRenderer.setFilterCategory(next as any);
+        console.log(`[Economy] Filter: ${next ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        if (!this.player) return;
+        const shops = this.economySystem.getAllShops();
+        const shopIdx = this.economyRenderer.getSelectedShopIndex();
+        const shop = shops[Math.max(0, Math.min(shopIdx, shops.length-1))];
+        if (!shop) return;
+        const isShift = this.input.isKeyDown('shift');
+        const qty = isShift ? 5 : 1;
+        const totalSeconds = this.timeManager.getTotalSeconds();
+        if (this.economyRenderer.getBuyMode()) {
+          // Need to get filtered items to find selected itemId
+          const inv = this.economySystem.getShopInventory(shop.id);
+          if (!inv) return;
+          let items: string[] = [];
+          for (const [itemId, q] of inv.entries()) {
+            if (q<=0 && !this.economySystem.isInfiniteStock(shop.id, itemId)) continue;
+            items.push(itemId);
+          }
+          // Apply filter sort roughly same as renderer: filter + sort by category/name
+          const db = this.itemDatabase;
+          const filterCat = this.economyRenderer.getFilterCategory();
+          let filtered = items.filter(id => {
+            const def = db.getItem(id);
+            if (!def) return false;
+            if (filterCat && def.category !== filterCat) return false;
+            return true;
+          });
+          filtered.sort((a,b) => {
+            const defA = db.getItem(a); const defB = db.getItem(b);
+            if (!defA || !defB) return 0;
+            if (defA.category !== defB.category) return defA.category.localeCompare(defB.category);
+            return defA.name.localeCompare(defB.name);
+          });
+          const selIdx = this.economyRenderer.getSelectedItemIndex();
+          if (selIdx <0 || selIdx>=filtered.length) return;
+          const itemId = filtered[selIdx];
+          const result = this.economySystem.buy(shop.id, itemId, qty, this.player as any, totalSeconds);
+          if (result.success) {
+            console.log(`[Economy] Bought ${qty}x ${itemId} from ${shop.id} for $${result.transaction?.totalPrice}`);
+            this.saveRenderer.showMessage(`🛒 Bought ${qty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#ffd700', 2);
+          } else {
+            console.log(`[Economy] Buy failed: ${result.reason}`);
+            this.saveRenderer.showMessage(`❌ Buy failed: ${result.reason}`, '#f88', 2);
+          }
+        } else {
+          // Sell mode - get player items grouped
+          const grouped = new Map<string, number>();
+          for (const slot of this.player.getInventory().getNonEmptySlots()) {
+            grouped.set(slot.id, (grouped.get(slot.id) ?? 0) + slot.quantity);
+          }
+          let items = Array.from(grouped.entries());
+          const filterCat = this.economyRenderer.getFilterCategory();
+          if (filterCat) {
+            items = items.filter(([id]) => {
+              const def = this.itemDatabase.getItem(id);
+              return def && def.category === filterCat;
+            });
+          }
+          items.sort((a,b) => {
+            const defA = this.itemDatabase.getItem(a[0]); const defB = this.itemDatabase.getItem(b[0]);
+            if (!defA || !defB) return 0;
+            if (defA.category !== defB.category) return defA.category.localeCompare(defB.category);
+            return defA.name.localeCompare(defB.name);
+          });
+          const selIdx = this.economyRenderer.getSelectedItemIndex();
+          if (selIdx<0 || selIdx>=items.length) return;
+          const itemId = items[selIdx][0];
+          const have = this.player.getItemQuantity(itemId);
+          const sellQty = Math.min(qty, have);
+          if (sellQty<=0) return;
+          const result = this.economySystem.sell(shop.id, itemId, sellQty, this.player as any, totalSeconds);
+          if (result.success) {
+            console.log(`[Economy] Sold ${sellQty}x ${itemId} to ${shop.id} for $${result.transaction?.totalPrice}`);
+            this.saveRenderer.showMessage(`💰 Sold ${sellQty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#8f8', 2);
+          } else {
+            console.log(`[Economy] Sell failed: ${result.reason}`);
+            this.saveRenderer.showMessage(`❌ Sell failed: ${result.reason}`, '#f88', 2);
+          }
+        }
+      }
+      return;
+    }
+
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
+      if (this.input.isKeyJustPressed('b') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.showEconomy = !this.showEconomy;
+        this.economyRenderer.setShowEconomy(this.showEconomy);
+        if (this.showEconomy) {
+          console.log('[Economy] Opened economy UI');
+          this.economyRenderer.setSelectedShopIndex(0);
+          this.economyRenderer.setSelectedItemIndex(0);
+        } else {
+          console.log('[Economy] Closed economy UI');
+        }
+        return;
+      }
+    }
+  }
+
   // ==================== PHASE 14 INVENTORY INPUT ==================== ==================== ====================
 
   private handleInventoryInput(): void {
@@ -1382,6 +1571,7 @@ export class Game {
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isCraftingOpen = this.showCrafting;
     const isCookingOpen = this.showCooking;
+    const isEconomyOpen = this.showEconomy;
 
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
@@ -1436,7 +1626,7 @@ export class Game {
       return;
     }
 
-    if (!isDialogueOpen && !isSaveUIOpen && !isCraftingOpen && !isCookingOpen) {
+    if (!isDialogueOpen && !isSaveUIOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy) {
       if (this.input.isKeyJustPressed('i') && !this.input.isKeyDown('control')) {
         if (this.input.isKeyDown('shift')) {
           return;
@@ -1657,6 +1847,7 @@ export class Game {
     if (this.showPlayerInventory) return;
     if (this.showCrafting) return;
     if (this.showCooking) return;
+    if (this.showEconomy) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1720,13 +1911,13 @@ export class Game {
 
     if (this.autoSaveTimer >= this.autoSaveInterval) {
       this.autoSaveTimer = 0;
-      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
         console.log('[Save] Auto-save triggered');
         this.saveGame(AUTO_SAVE_SLOT);
       }
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
       this.timeManager.update(deltaTime);
     }
 
@@ -1828,12 +2019,13 @@ export class Game {
       const isInventoryOpen = this.showPlayerInventory;
       const isCraftingOpen = this.showCrafting;
       const isCookingOpen = this.showCooking;
-      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
+      const isEconomyOpen = this.showEconomy;
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
@@ -1842,7 +2034,7 @@ export class Game {
       }
 
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
+      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy) {
         this.handleDialogueInput();
       }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
@@ -1851,6 +2043,7 @@ export class Game {
       this.handleCraftingInput();
       this.handleCookingInput();
       this.handleWeatherInput();
+      this.handleEconomyInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
@@ -2178,6 +2371,19 @@ export class Game {
           showWeather: this.showWeather
         });
       }
+
+      if (this.economySystem) {
+        (this.debug as any).setEconomyInfo?.({
+          shopCount: this.economyDatabase.getCount(),
+          shops: this.economyDatabase.getAllShops().map(s=>s.id),
+          totalStock: this.economySystem.getTotalStockCount(),
+          totalTransactions: this.economySystem.getTotalTransactions(),
+          totalSpent: this.economySystem.getTotalSpent(),
+          totalEarned: this.economySystem.getTotalEarned(),
+          debug: this.economySystem.getDebugString(),
+          showEconomy: this.showEconomy
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -2285,7 +2491,7 @@ export class Game {
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
 
-    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking) return;
+    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking || this.showEconomy) return;
 
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
@@ -2486,6 +2692,8 @@ export class Game {
       console.log(`[Farming] ${this.cropDatabase.getDebugString()} | ${this.farmingSystem.getDebugString()} | Map: ${this.farmingSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
       console.log(`[Animals] ${this.animalDatabase.getDebugString()} | ${this.animalSystem.getDebugString()} | Map: ${this.animalSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
       console.log(`[Weather] ${this.weatherDatabase.getDebugString()} | ${this.weatherSystem.getDebugString()}`);
+      console.log(`[Economy] ${this.economyDatabase.getDebugString()} | ${this.economySystem.getDebugString()}`);
+      this.economySystem.debugPrint();
       if (this.player) {
         console.log(`[Inventory Detailed] ${this.player.getInventoryDetailedString()}`);
         const tilePos = this.player.getTilePosition();
@@ -2528,6 +2736,7 @@ export class Game {
       this.runPhase16_2Tests();
       this.runPhase16_3Tests();
       this.runPhase16_4Tests();
+      this.runPhase16_5Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
@@ -3425,6 +3634,62 @@ export class Game {
     console.log(`[Weather] ${this.weatherSystem.getDebugString()} | Weathers: ${this.weatherDatabase.getDebugString()}`);
   }
 
+  private runPhase16_5Tests(): void {
+    console.log('=== PHASE 16.5 TESTS - ECONOMY / SHOP SYSTEM ===');
+
+    const shopCount = this.economyDatabase.getCount();
+    console.log(`Test1 ShopDatabase count: ${shopCount} shops (expected 3) -> ${shopCount===3 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Shops: ${this.economyDatabase.getDebugString()}`);
+
+    const validation = this.economyDatabase.validate();
+    console.log(`Test2 ShopDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const stock = this.economySystem.getTotalStockCount();
+    console.log(`Test3 total stock: ${stock} expected >50 -> ${stock>50 ? 'PASS' : 'FAIL'}`);
+
+    const testInv = new Inventory(20, this.itemDatabase);
+    testInv.addItem('wood', 5);
+    const playerMoneyBefore = this.player ? this.player.money : 100;
+    // Use temporary player object
+    const tempPlayer = {
+      money: 100,
+      getInventory: () => testInv,
+      addItem: (id:string, qty:number) => testInv.addItem(id, qty),
+      removeItem: (id:string, qty:number) => testInv.removeItem(id, qty)
+    };
+    const canBuy = this.economySystem.canBuy('general_store', 'wood', 1, tempPlayer.money, testInv);
+    console.log(`Test4 canBuy wood 1 with $100: can=${canBuy.can} price=${canBuy.pricePerUnit} -> ${canBuy.can ? 'PASS' : 'FAIL'}`);
+
+    const buyRes = this.economySystem.buy('general_store', 'wood', 2, tempPlayer as any, this.timeManager.getTotalSeconds());
+    console.log(`Test5 buy 2 wood: success=${buyRes.success} money ${tempPlayer.money} wood qty ${testInv.getItemQuantity('wood')} expected 7 -> ${buyRes.success && testInv.getItemQuantity('wood')===7 ? 'PASS' : 'FAIL'}`);
+
+    const canSell = this.economySystem.canSell('general_store', 'wood', 1, testInv);
+    console.log(`Test6 canSell wood 1: can=${canSell.can} price=${canSell.pricePerUnit} -> ${canSell.can ? 'PASS' : 'FAIL'}`);
+
+    const sellRes = this.economySystem.sell('general_store', 'wood', 3, tempPlayer as any, this.timeManager.getTotalSeconds()+10);
+    console.log(`Test7 sell 3 wood: success=${sellRes.success} money ${tempPlayer.money} wood ${testInv.getItemQuantity('wood')} expected 4 -> ${sellRes.success && testInv.getItemQuantity('wood')===4 ? 'PASS' : 'FAIL'}`);
+
+    const saveData = this.economySystem.getSaveData();
+    console.log(`Test8 getSaveData: shops=${Object.keys(saveData.shopInventories).length} tx=${saveData.transactionHistory.length} spent=${saveData.totalSpent} earned=${saveData.totalEarned} -> ${saveData.transactionHistory.length===2 ? 'PASS' : 'FAIL'}`);
+
+    const newEconomy = new EconomySystem(this.economyDatabase, this.itemDatabase);
+    newEconomy.loadSaveData(saveData);
+    console.log(`Test8b loadSaveData: wood stock ${newEconomy.getShopStock('general_store','wood')} tx ${newEconomy.getTransactionHistory().length} -> ${newEconomy.getTransactionHistory().length===2 ? 'PASS' : 'FAIL'}`);
+
+    const buyPrice = this.economySystem.getBuyPrice('food_stall','bread');
+    const sellPrice = this.economySystem.getSellPrice('food_stall','bread');
+    const breadVal = this.itemDatabase.getItem('bread')?.value ?? 0;
+    console.log(`Test9 bread value ${breadVal} buy $${buyPrice} sell $${sellPrice} -> ${buyPrice>breadVal && sellPrice<breadVal ? 'PASS' : 'FAIL'}`);
+
+    // Transaction history
+    const history = this.economySystem.getTransactionHistory();
+    console.log(`Test10 transaction history: ${history.length} tx totalSpent ${this.economySystem.getTotalSpent()} totalEarned ${this.economySystem.getTotalEarned()} -> ${history.length>=2 ? 'PASS' : 'FAIL'}`);
+
+    console.log('=== END PHASE 16.5 TESTS ===');
+    console.log(`[Economy] ${this.economySystem.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -3515,7 +3780,7 @@ export class Game {
       this.minimapRenderer.renderFullMap(ctx, map, this.explorationSystem, w, h);
     }
 
-    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory) {
+    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
       this.dialogueRenderer.renderInteractionPrompt(ctx, this.interactionSystem, w, h);
     }
 
@@ -3531,14 +3796,17 @@ export class Game {
       this.craftingRenderer.render(ctx, w, h, this.craftingSystem, this.player.getInventory());
     } else if (this.showCooking && this.player) {
       this.cookingRenderer.render(ctx, w, h, this.cookingSystem, this.player.getInventory());
+    } else if (this.showEconomy && this.player) {
+      this.economyRenderer.render(ctx, w, h, this.economySystem, this.player.getInventory(), this.player.money);
     } else if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       // Quick hints
       this.craftingRenderer.renderQuickHint(ctx, w, h, this.craftingSystem, this.player.getInventory());
       this.cookingRenderer.renderQuickHint(ctx, w, h, this.cookingSystem, this.player.getInventory());
+      this.economyRenderer.renderQuickHint(ctx, w, h, this.economySystem, this.player.money);
     }
 
     // Farming selected plot info (when not in inventory)
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
@@ -3546,7 +3814,7 @@ export class Game {
     }
 
     // Animals selected info
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
       const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
       if (animal) {
         this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
@@ -3563,7 +3831,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -3636,7 +3904,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 16.4 - WEATHER SYSTEM',
+      'PHASE 16.5 - ECONOMY / SHOP SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -3699,12 +3967,19 @@ export class Game {
       '  Weathers: sunny ☀️, cloudy ☁️, rainy 🌧️ auto-waters crops, stormy ⛈️, foggy 🌫️ reduces vision, snowy ❄️',
       '  Effects: farming growth multiplier, animal happiness, vision, stamina',
       '  Rain auto-waters growing plots, transitions every 0.2-3 days game time',
-      '  P - Print all including weather, T - Run all tests 7-16.4',
+      'Economy / Shop System (Phase 16.5):',
+      '  Shift+B - Toggle shop/economy UI (B for bazaar, avoid WASD)',
+      '  Q/E - Cycle shops (general_store 🏪, food_stall 🍎, tool_shop 🔨)',
+      '  W/S - Navigate items, TAB toggle BUY/SELL, C filter category, Enter buy/sell 1, Shift+Enter x5',
+      '  Buy: price = value x buyMultiplier (1.2 general, 1.15 food, 1.3 tool), checks money + inventory space',
+      '  Sell: price = value x sellMultiplier (0.7 general, 0.8 food, 0.75 tool), adds to shop stock',
+      '  Transaction history, totalSpent/totalEarned, persistence v20',
+      '  P - Print all including economy, T - Run all tests 7-16.5',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable | Weather: ${this.weatherSystem.getCurrentWeather()?.icon ?? ''}${this.weatherSystem.getCurrentWeatherId()} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}%`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable | Weather: ${this.weatherSystem.getCurrentWeather()?.icon ?? ''}${this.weatherSystem.getCurrentWeatherId()} ${(this.weatherSystem.getIntensity()*100).toFixed(0)}% | Economy: ${this.economySystem.getShopCount()} shops Stock:${this.economySystem.getTotalStockCount()} Tx:${this.economySystem.getTotalTransactions()} $${this.economySystem.getTotalSpent()}/$${this.economySystem.getTotalEarned()}`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -3810,11 +4085,15 @@ export class Game {
   getWeatherDatabase(): WeatherDatabase { return this.weatherDatabase; }
   getWeatherSystem(): WeatherSystem { return this.weatherSystem; }
   getWeatherRenderer(): WeatherRenderer { return this.weatherRenderer; }
+  getEconomyDatabase(): ShopDatabase { return this.economyDatabase; }
+  getEconomySystem(): EconomySystem { return this.economySystem; }
+  getEconomyRenderer(): EconomyRenderer { return this.economyRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
   isAnimalsShowing(): boolean { return this.showAnimals; }
   isCraftingShowing(): boolean { return this.showCrafting; }
   isCookingShowing(): boolean { return this.showCooking; }
   isWeatherShowing(): boolean { return this.showWeather; }
+  isEconomyShowing(): boolean { return this.showEconomy; }
   isGameRunning(): boolean { return this.isRunning; }
 }
