@@ -62,6 +62,14 @@ export enum ItemType {
   LETTER = 'letter',
   KEY = 'key',
 
+  // Animal products & feed (Phase 16.1)
+  EGG = 'egg',
+  MILK = 'milk',
+  WOOL = 'wool',
+  HAY = 'hay',
+  ANIMAL_FEED = 'animal_feed',
+  TRUFFLE = 'truffle',
+
   // Misc
   FLOWER = 'flower',
   FEATHER = 'feather'

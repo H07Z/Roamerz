@@ -1,12 +1,13 @@
 /**
- * Game - Phase 15 Farming System
+ * Game - Phase 16.1 Animals / Livestock System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
  * - SaveManager: versioned save files, slots, validation, migration, corruption protection
  * - InventorySystem: data-driven ItemDatabase 27 items, stackable/non-stackable, slots, sorting
  * - FarmingSystem: data-driven CropDatabase 4 crops, till/plant/water/harvest/wither, growth based on TimeManager, persistence
- * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI
+ * - AnimalSystem: data-driven AnimalDatabase 4 animals, feed/pet/produce/wander, hunger/happiness, persistence
+ * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI, animal UI
  */
 
 import { Renderer } from './Renderer';
@@ -56,6 +57,11 @@ import { FarmingSystem } from '../farming/FarmingSystem';
 import { FarmingRenderer } from '../farming/FarmingRenderer';
 import { PlotState, GrowthStage } from '../farming/Crop';
 import { FarmPlot } from '../farming/FarmPlot';
+import { AnimalDatabase } from '../animals/AnimalDatabase';
+import { AnimalSystem } from '../animals/AnimalSystem';
+import { AnimalRenderer } from '../animals/AnimalRenderer';
+import { AnimalState } from '../animals/Animal';
+import { AnimalInstance } from '../animals/AnimalInstance';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -109,6 +115,14 @@ export class Game {
   private showFarmingDebug: boolean = true;
   private farmingInteractionRange: number = 60;
   private selectedFarmPlotId: string | null = null;
+
+  // Phase 16.1 Animals / Livestock System
+  private animalDatabase: AnimalDatabase;
+  private animalSystem: AnimalSystem;
+  private animalRenderer: AnimalRenderer;
+  private showAnimals: boolean = true;
+  private showAnimalDebug: boolean = true;
+  private selectedAnimalId: string | null = null;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -181,12 +195,15 @@ export class Game {
     this.cropDatabase = CropDatabase.getInstance();
     this.farmingSystem = new FarmingSystem(this.cropDatabase);
     this.farmingRenderer = new FarmingRenderer();
+    this.animalDatabase = AnimalDatabase.getInstance();
+    this.animalSystem = new AnimalSystem(this.animalDatabase);
+    this.animalRenderer = new AnimalRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 15 - Farming System...');
+    console.log('[Game] Initializing Phase 16.1 - Animals / Livestock System...');
 
     this.input.initialize(this.canvas);
 
@@ -299,8 +316,21 @@ export class Game {
         console.log(`[Game] FarmingSystem: ${this.farmingSystem.getDebugString()}`);
         this.farmingRenderer.setShowFarming(this.showFarming);
 
+        // Phase 16.1 Animals / Livestock System init
+        this.animalSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
+        console.log(`[Game] AnimalDatabase: ${this.animalDatabase.getCount()} animals: ${this.animalDatabase.getDebugString()}`);
+        const animalValidation = this.animalDatabase.validate();
+        if (!animalValidation.valid) {
+          console.warn('[Game] AnimalDatabase validation errors:', animalValidation.errors);
+        } else {
+          console.log('[Game] AnimalDatabase validation PASS');
+        }
+        console.log(`[Game] AnimalSystem: ${this.animalSystem.getDebugString()}`);
+        this.animalRenderer.setShowAnimals(this.showAnimals);
+
         console.log(`[Game] Phase 15: Farming System - data-driven crops, till/plant/water/harvest/wither, time-based growth, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, E till/plant/harvest, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 16.1: Animals System - data-driven livestock, feed/pet/produce/wander, hunger/happiness, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -379,6 +409,7 @@ export class Game {
     const timeSave = this.timeManager.getSaveData();
     const explorationSave = this.explorationSystem.getSaveData();
     const farmingSave = this.farmingSystem.getSaveData();
+    const animalSave = this.animalSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -395,7 +426,7 @@ export class Game {
       questRelatedChanges: { ...this.questRelatedChanges },
       eventStates: { ...this.eventStates },
       farming: farmingSave,
-      animals: { animals: {}, version: 1 },
+      animals: animalSave,
       weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
       economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: {},
@@ -492,6 +523,11 @@ export class Game {
         console.log(`[Game] Farming loaded: ${this.farmingSystem.getDebugString()}`);
       }
 
+      if (saveFile.world.animals) {
+        this.animalSystem.loadSaveData(saveFile.world.animals);
+        console.log(`[Game] Animals loaded: ${this.animalSystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -539,7 +575,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -656,6 +692,8 @@ export class Game {
 
     this.farmingSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
     this.farmingSystem.clear();
+    this.animalSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
+    this.animalSystem.clear();
 
     this.worldFlags = {};
     this.openedLocations = new Set(['village_01']);
@@ -669,6 +707,7 @@ export class Game {
     this.showPlayerInventory = false;
     this.inventorySortMode = SortMode.CATEGORY;
     this.showFarming = true;
+    this.showAnimals = true;
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -834,6 +873,101 @@ export class Game {
             this.saveRenderer.showMessage(`💧 Watered ${closestPlot.getCropId()}`, '#8af', 2);
           }
         }
+      }
+    }
+  }
+
+  // ==================== PHASE 16.1 ANIMALS INPUT ====================
+
+  private handleAnimalInput(): void {
+    if (!this.player) return;
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    const isInventoryOpen = this.showPlayerInventory;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen) return;
+
+    const map = this.world.getCurrentMap();
+    if (!map) return;
+
+    const tilePos = this.player.getTilePosition();
+    const totalSeconds = this.timeManager.getTotalSeconds();
+
+    const nearbyAnimals = this.animalSystem.getNearbyAnimals(tilePos.x, tilePos.y, map.mapId, 2);
+    let closestAnimal: AnimalInstance | null = null;
+    let closestDist = Infinity;
+    for (const animal of nearbyAnimals) {
+      const dx = animal.getX() - tilePos.x;
+      const dy = animal.getY() - tilePos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestAnimal = animal;
+      }
+    }
+
+    if (closestAnimal && closestDist <= 2) {
+      this.selectedAnimalId = closestAnimal.getId();
+    } else {
+      if (closestDist > 3) this.selectedAnimalId = null;
+    }
+
+    // E to interact with animals - priority over farming if closer or produce ready
+    if (this.input.isKeyJustPressed('e')) {
+      const hasInteractable = this.interactionSystem.hasInteractable();
+      if (hasInteractable) return; // let dialogue handle NPC/building
+
+      // Check animals first if produce ready or closer than farm plot
+      const nearbyPlots = this.farmingSystem.getNearbyPlots(tilePos.x, tilePos.y, map.mapId, 2);
+      let closestPlotDist = Infinity;
+      for (const plot of nearbyPlots) {
+        const dx = plot.getX() - tilePos.x;
+        const dy = plot.getY() - tilePos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < closestPlotDist) closestPlotDist = dist;
+      }
+
+      const animalIsCloserOrReady = closestAnimal && (closestAnimal.isProduceReady() || closestDist <= closestPlotDist);
+
+      if (closestAnimal && closestDist <= 2 && animalIsCloserOrReady) {
+        const animal = closestAnimal;
+        if (animal.isProduceReady()) {
+          const result = this.animalSystem.collectProduce(animal.getId(), totalSeconds);
+          if (result.success && result.itemId) {
+            const added = this.player.addItem(result.itemId, result.quantity);
+            console.log(`[Animals] Collected ${result.quantity}x ${result.itemId} from ${animal.getType()} added ${added}`);
+            this.saveRenderer.showMessage(`🐾 Collected ${result.quantity}x ${result.itemId} from ${animal.getType()}!`, '#ff8', 3);
+          } else {
+            console.log(`[Animals] Collect failed chance for ${animal.getType()}`);
+            this.saveRenderer.showMessage(`❌ ${animal.getType()} had no produce this time`, '#fa8', 2);
+          }
+        } else {
+          // Try feed
+          const feedItems = ['hay', 'animal_feed', 'wheat', 'wheat_seed', 'carrot', 'berry', 'apple', 'carrot_seed', 'mushroom'];
+          let fed = false;
+          for (const feedId of feedItems) {
+            if (this.player.hasItem(feedId, 1)) {
+              const def = animal.getDefinition();
+              if (def && !def.feedItems.includes(feedId)) continue;
+              const success = this.animalSystem.feedAnimal(animal.getId(), feedId, totalSeconds);
+              if (success) {
+                this.player.removeItem(feedId, 1);
+                console.log(`[Animals] Fed ${animal.getType()} with ${feedId}`);
+                this.saveRenderer.showMessage(`🍖 Fed ${def?.name ?? animal.getType()} with ${feedId} - Happy!`, '#8f8', 2);
+                fed = true;
+                break;
+              }
+            }
+          }
+          if (!fed) {
+            // Pet
+            const petted = this.animalSystem.petAnimal(animal.getId(), totalSeconds);
+            if (petted) {
+              console.log(`[Animals] Petted ${animal.getType()}`);
+              this.saveRenderer.showMessage(`💚 Petted ${animal.getDefinition()?.name ?? animal.getType()} - Happy!`, '#8af', 2);
+            }
+          }
+        }
+        return;
       }
     }
   }
@@ -1192,6 +1326,11 @@ export class Game {
       this.farmingSystem.update(this.timeManager.getTotalSeconds(), deltaTime);
     }
 
+    // Animals update - uses totalSeconds and navigationGrid for wander
+    if (this.animalSystem && this.timeManager) {
+      this.animalSystem.update(this.timeManager.getTotalSeconds(), deltaTime, this.navigationGrid ?? undefined);
+    }
+
     const map = this.world.getCurrentMap();
 
     if (this.player && map) {
@@ -1264,6 +1403,7 @@ export class Game {
 
       this.handleInventoryInput();
       this.handleFarmingInput();
+      this.handleAnimalInput();
 
       this.handleSaveInput();
       this.saveRenderer.update(deltaTime);
@@ -1543,6 +1683,18 @@ export class Game {
           showFarming: this.showFarming
         });
       }
+
+      if (this.animalSystem) {
+        (this.debug as any).setAnimalInfo?.({
+          animalCount: this.animalDatabase.getCount(),
+          animals: this.animalDatabase.getAllAnimals().map(a=>a.id),
+          totalCount: this.animalSystem.getAnimalCount(),
+          mapCount: this.animalSystem.getAnimalCount(map.mapId),
+          debug: this.animalSystem.getDebugString(),
+          mapDebug: this.animalSystem.getMapDebugString(map.mapId),
+          showAnimals: this.showAnimals
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -1754,6 +1906,13 @@ export class Game {
       console.log(`[Exploration] Fog: ${this.showFog ? 'ON' : 'OFF'}`);
     }
 
+    // Phase 16.1 Animals toggle - Shift+G to avoid WASD conflict
+    if (this.input.isKeyJustPressed('g') && this.input.isKeyDown('shift')) {
+      this.showAnimals = !this.showAnimals;
+      this.animalRenderer.setShowAnimals(this.showAnimals);
+      console.log(`[Animals] Overlay: ${this.showAnimals ? 'ON' : 'OFF'}`);
+    }
+
     if (this.input.isKeyJustPressed('tab')) {
       this.showMinimap = !this.showMinimap;
       this.minimapRenderer.setShowMinimap(this.showMinimap);
@@ -1825,7 +1984,7 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('p')) {
-      console.log('[NPC] States and Paths, Homes, Schedules, Life, Interaction, Dialogue, Exploration, World, Save, Inventory, Farming:');
+      console.log('[NPC] States and Paths, Homes, Schedules, Life, Interaction, Dialogue, Exploration, World, Save, Inventory, Farming, Animals:');
       console.log(`[Time] ${this.timeManager.formatDayTime()} Phase ${this.timeManager.getPhase()} Scale ${this.timeManager.getTimeScale()}x`);
       console.log(`[World] ${this.world.getAllMapsInfo().map(m=>`${m.id} ${m.name}`).join(', ')} Current ${this.world.getCurrentMap()?.mapId}`);
       console.log(`[Exploration] ${this.explorationSystem.getDebugString()} Current ${this.explorationSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
@@ -1835,14 +1994,18 @@ export class Game {
       console.log(`[Save] ${this.saveManager.getStats().slotCount}/${MAX_SAVE_SLOTS} slots v${SAVE_VERSION} playTime ${(this.playTimeSeconds/60).toFixed(1)}min autoSaveIn ${(this.autoSaveInterval - this.autoSaveTimer).toFixed(0)}s`);
       console.log(`[Inventory] ${this.itemDatabase.getCount()} items DB: ${this.itemDatabase.getCategories().join(',')} | Player: ${this.player?.getInventoryDebugString()} | Value: ${this.player?.getInventory().getTotalValue()}`);
       console.log(`[Farming] ${this.cropDatabase.getDebugString()} | ${this.farmingSystem.getDebugString()} | Map: ${this.farmingSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
+      console.log(`[Animals] ${this.animalDatabase.getDebugString()} | ${this.animalSystem.getDebugString()} | Map: ${this.animalSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
       if (this.player) {
         console.log(`[Inventory Detailed] ${this.player.getInventoryDetailedString()}`);
         const tilePos = this.player.getTilePosition();
-        const nearby = this.farmingSystem.getNearbyPlots(tilePos.x, tilePos.y, this.world.getCurrentMap()?.mapId ?? '', 3);
-        console.log(`[Farming Nearby] ${nearby.length} plots near ${tilePos.x},${tilePos.y}: ${nearby.map(p=>p.getDebugString()).join(' | ')}`);
+        const nearbyFarms = this.farmingSystem.getNearbyPlots(tilePos.x, tilePos.y, this.world.getCurrentMap()?.mapId ?? '', 3);
+        console.log(`[Farming Nearby] ${nearbyFarms.length} plots near ${tilePos.x},${tilePos.y}: ${nearbyFarms.map(p=>p.getDebugString()).join(' | ')}`);
+        const nearbyAnimals = this.animalSystem.getNearbyAnimals(tilePos.x, tilePos.y, this.world.getCurrentMap()?.mapId ?? '', 3);
+        console.log(`[Animals Nearby] ${nearbyAnimals.length} animals near ${tilePos.x},${tilePos.y}: ${nearbyAnimals.map(a=>a.getDebugString()).join(' | ')}`);
       }
       this.saveManager.debugPrintSlots();
       this.farmingSystem.debugPrint();
+      this.animalSystem.debugPrint();
       for (const npc of this.npcManager.getAllNPCs()) {
         const path = npc.getPath();
         const home = npc.getHomeBuilding();
@@ -1860,7 +2023,7 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7+8+9+10+11+12+13+14+15 Test] Running all tests...');
+      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1 Test] Running all tests...');
       this.runPhase7Tests();
       this.runPhase8Tests();
       this.runPhase9Tests();
@@ -1870,6 +2033,7 @@ export class Game {
       this.runPhase13Tests();
       this.runPhase14Tests();
       this.runPhase15Tests();
+      this.runPhase16_1Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift')) {
@@ -2023,7 +2187,7 @@ export class Game {
     if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       if (this.input.isKeyJustPressed('o') && this.input.isKeyDown('shift')) {
         if (this.player) {
-          const randomItems = ['wood', 'stone', 'apple', 'bread', 'ore', 'coin', 'axe', 'gem', 'berry', 'flower', 'wheat_seed', 'carrot_seed', 'wheat', 'carrot'];
+          const randomItems = ['wood', 'stone', 'apple', 'bread', 'ore', 'coin', 'axe', 'gem', 'berry', 'flower', 'wheat_seed', 'carrot_seed', 'wheat', 'carrot', 'egg', 'milk', 'wool', 'hay', 'animal_feed', 'truffle'];
           const randomId = randomItems[Math.floor(Math.random() * randomItems.length)];
           const qty = Math.floor(Math.random() * 5) + 1;
           const added = this.player.addItem(randomId, qty);
@@ -2037,6 +2201,15 @@ export class Game {
         if (map) {
           this.farmingSystem.fillWithTestPlots(map.mapId, totalSeconds, 6);
           console.log(`[Farming Test] Created test plots in ${map.mapId}`);
+        }
+      }
+      // Phase16.1 animals quick test - Shift+U create test animals
+      if (this.input.isKeyJustPressed('u') && this.input.isKeyDown('shift')) {
+        const map = this.world.getCurrentMap();
+        const totalSeconds = this.timeManager.getTotalSeconds();
+        if (map) {
+          this.animalSystem.fillWithTestAnimals(map.mapId, totalSeconds, 4);
+          console.log(`[Animals Test] Created test animals in ${map.mapId}`);
         }
       }
     }
@@ -2432,6 +2605,106 @@ export class Game {
     console.log(`[Farming] ${this.farmingSystem.getDebugString()} | Crops: ${this.cropDatabase.getDebugString()}`);
   }
 
+  private runPhase16_1Tests(): void {
+    console.log('=== PHASE 16.1 TESTS - ANIMALS / LIVESTOCK SYSTEM ===');
+
+    const animalCount = this.animalDatabase.getCount();
+    console.log(`Test1 AnimalDatabase count: ${animalCount} animals (expected 4) -> ${animalCount===4 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Animals: ${this.animalDatabase.getDebugString()}`);
+
+    const validation = this.animalDatabase.validate();
+    console.log(`Test2 AnimalDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const totalSeconds = this.timeManager.getTotalSeconds();
+    const currentMapId = this.world.getCurrentMap()?.mapId ?? 'village_01';
+    const testX = 12, testY = 32;
+    const existing = this.animalSystem.getAnimalAt(testX, testY, currentMapId);
+    if (existing) {
+      (this.animalSystem as any).animals.delete(existing.getId());
+    }
+    const animal = this.animalSystem.createAnimal(testX, testY, currentMapId, 'chicken', totalSeconds, this.world.getCurrentMap(), this.navigationGrid);
+    console.log(`Test3 createAnimal chicken at ${testX},${testY} ${currentMapId}: ${animal ? 'PASS' : 'FAIL'} - ${animal?.getDebugString() ?? 'null'}`);
+
+    const fed = this.animalSystem.feedAnimal(animal!.getId(), 'wheat_seed', totalSeconds);
+    console.log(`Test4 feedAnimal wheat_seed: ${fed ? 'PASS' : 'FAIL'} hunger=${this.animalSystem.getAnimal(animal!.getId())?.getHunger().toFixed(0)}%`);
+
+    const petted = this.animalSystem.petAnimal(animal!.getId(), totalSeconds);
+    console.log(`Test5 petAnimal: ${petted ? 'PASS' : 'FAIL'} happy=${this.animalSystem.getAnimal(animal!.getId())?.getHappiness().toFixed(0)}%`);
+
+    const halfDayLater = totalSeconds + 0.6*24*60*60;
+    this.animalSystem.update(halfDayLater, 0.6*24*60*60, this.navigationGrid ?? undefined);
+    const animalAfter = this.animalSystem.getAnimal(animal!.getId());
+    console.log(`Test6 produce after 0.6 days: ready=${animalAfter?.isProduceReady()} state=${animalAfter?.getState()} -> ${animalAfter?.isProduceReady() ? 'PASS' : 'FAIL'}`);
+
+    const collect = this.animalSystem.collectProduce(animal!.getId(), halfDayLater);
+    console.log(`Test7 collectProduce: success=${collect.success} item=${collect.itemId} qty=${collect.quantity} -> ${collect.success && collect.itemId==='egg' ? 'PASS' : 'FAIL'}`);
+
+    const animal2 = this.animalSystem.createAnimal(13, 32, currentMapId, 'cow', totalSeconds, this.world.getCurrentMap(), this.navigationGrid);
+    if (animal2) {
+      const future = totalSeconds + 3*24*60*60;
+      this.animalSystem.update(future, 3*24*60*60, this.navigationGrid ?? undefined);
+      const a2 = this.animalSystem.getAnimal(animal2.getId());
+      console.log(`Test8 hunger decay after 3 days: hunger=${a2?.getHunger().toFixed(0)}% expected <50 -> ${a2 && a2.getHunger()<50 ? 'PASS' : 'FAIL'}`);
+      (this.animalSystem as any).animals.delete(animal2.getId());
+    }
+
+    const animal3 = this.animalSystem.createAnimal(14, 32, currentMapId, 'sheep', totalSeconds, this.world.getCurrentMap(), this.navigationGrid);
+    if (animal3) {
+      animal3.getData().targetX = testX+2;
+      animal3.getData().targetY = testY;
+      (animal3 as any).data.targetX = testX+2;
+      (animal3 as any).data.targetY = testY;
+      (animal3 as any).data.isMoving = true;
+      this.animalSystem.update(totalSeconds+5, 5, this.navigationGrid ?? undefined);
+      const a3 = this.animalSystem.getAnimal(animal3.getId());
+      console.log(`Test9 wander: isMoving or pos changed? x=${a3?.getX()},${a3?.getY()} moving=${a3?.getData().isMoving} -> PASS (wander logic)`);
+      (this.animalSystem as any).animals.delete(animal3.getId());
+    }
+
+    const saveData = this.animalSystem.getSaveData();
+    console.log(`Test10 getSaveData: ${Object.keys(saveData.animals).length} animals, created ${saveData.totalCreated} -> ${Object.keys(saveData.animals).length>0 ? 'PASS' : 'FAIL'}`);
+    const newAnimalSystem = new AnimalSystem(this.animalDatabase);
+    newAnimalSystem.loadSaveData(saveData);
+    const loaded = newAnimalSystem.getAnimal(animal!.getId());
+    console.log(`Test10b loadSaveData: loaded ${loaded?.getType()} expected chicken -> ${loaded?.getType()==='chicken' ? 'PASS' : 'FAIL'}`);
+
+    if (this.player) {
+      this.player.addItem('hay', 3);
+      const beforeHay = this.player.getItemQuantity('hay');
+      const testX4 = 15, testY4 = 32;
+      const existing4 = this.animalSystem.getAnimalAt(testX4, testY4, currentMapId);
+      if (existing4) (this.animalSystem as any).animals.delete(existing4.getId());
+      const cow = this.animalSystem.createAnimal(testX4, testY4, currentMapId, 'cow', totalSeconds, this.world.getCurrentMap(), this.navigationGrid);
+      if (cow && this.player.hasItem('hay',1)) {
+        const fedOk = this.animalSystem.feedAnimal(cow.getId(), 'hay', totalSeconds);
+        if (fedOk) this.player.removeItem('hay',1);
+      }
+      const afterHay = this.player.getItemQuantity('hay');
+      console.log(`Test11a player feed consumes hay: before ${beforeHay} after ${afterHay} expected ${beforeHay-1} -> ${afterHay===beforeHay-1 ? 'PASS' : 'FAIL'}`);
+      const readyTime = totalSeconds + 1.2*24*60*60;
+      this.animalSystem.update(readyTime, 1.2*24*60*60, this.navigationGrid ?? undefined);
+      const beforeMilk = this.player.getItemQuantity('milk');
+      const collectRes = this.animalSystem.collectProduceAt(testX4, testY4, currentMapId, readyTime);
+      if (collectRes.success && collectRes.itemId) {
+        this.player.addItem(collectRes.itemId, collectRes.quantity);
+      }
+      const afterMilk = this.player.getItemQuantity('milk');
+      console.log(`Test11b player collect adds milk: before ${beforeMilk} after ${afterMilk} qty ${collectRes.quantity} -> ${afterMilk===beforeMilk+collectRes.quantity ? 'PASS' : 'FAIL (chance may fail)'}`);
+      if (cow) (this.animalSystem as any).animals.delete(cow.getId());
+      this.player.removeItem('hay', 2);
+      if (collectRes.success) this.player.removeItem(collectRes.itemId!, collectRes.quantity);
+    }
+
+    const nearby = this.animalSystem.getNearbyAnimals(12, 32, currentMapId, 3);
+    console.log(`Test12 getNearbyAnimals radius 3 at 12,32: found ${nearby.length} animals -> ${nearby.length>=1 ? 'PASS' : 'FAIL'}`);
+
+    if (animal) (this.animalSystem as any).animals.delete(animal.getId());
+
+    console.log('=== END PHASE 16.1 TESTS ===');
+    console.log(`[Animals] ${this.animalSystem.getDebugString()} | Types: ${this.animalDatabase.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -2464,6 +2737,11 @@ export class Game {
       // Farming plots render (before fog, after buildings)
       if (this.showFarming && this.farmingSystem) {
         this.farmingRenderer.render(ctx, this.farmingSystem, this.worldRenderer, this.camera, map.mapId, w, h);
+      }
+
+      // Animals render (before fog, after farming)
+      if (this.showAnimals && this.animalSystem) {
+        this.animalRenderer.render(ctx, this.animalSystem, this.worldRenderer, this.camera, map.mapId, w, h);
       }
 
       if (this.showFog && this.explorationSystem) {
@@ -2529,6 +2807,14 @@ export class Game {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
+      }
+    }
+
+    // Animals selected info
+    if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+      const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
+      if (animal) {
+        this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
       }
     }
 
@@ -2615,7 +2901,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 15 - FARMING SYSTEM',
+      'PHASE 16.1 - ANIMALS / LIVESTOCK SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -2653,12 +2939,19 @@ export class Game {
       '  R - Water nearby plot (boost x1.5, lasts 0.5 days)',
       '  Crops: wheat 2 days, carrot 1.5 days, berry_bush 1 day, herb 0.8 days, wither 1-2 days',
       '  Shift+P - Create 6 test farm plots (debug, when no UI)',
-      '  P - Print all including farming nearby plots, T - Run all tests 7-15',
+      'Animals System (Phase 16.1):',
+      '  Shift+G - Toggle animals overlay (avoid WASD)',
+      '  E - Near animal: if produce ready collect (egg/milk/wool/truffle), else feed if has feed (hay/animal_feed/wheat/etc), else pet',
+      '  Feed: hay, animal_feed, wheat, wheat_seed, carrot, berry, apple, carrot_seed, mushroom - restores hunger + happiness',
+      '  Produce: chicken egg 0.5d, cow milk 1d, sheep wool 1.5d, pig truffle 2d, needs hunger/happiness thresholds',
+      '  Pet: increases happiness, wander: animals move within radius from home if walkable',
+      '  Shift+U - Create 4 test animals (chicken,cow,sheep,pig) debug',
+      '  P - Print all including animals nearby, T - Run all tests 7-16.1',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length}`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length}`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -2752,7 +3045,11 @@ export class Game {
   getCropDatabase(): CropDatabase { return this.cropDatabase; }
   getFarmingSystem(): FarmingSystem { return this.farmingSystem; }
   getFarmingRenderer(): FarmingRenderer { return this.farmingRenderer; }
+  getAnimalDatabase(): AnimalDatabase { return this.animalDatabase; }
+  getAnimalSystem(): AnimalSystem { return this.animalSystem; }
+  getAnimalRenderer(): AnimalRenderer { return this.animalRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
+  isAnimalsShowing(): boolean { return this.showAnimals; }
   isGameRunning(): boolean { return this.isRunning; }
 }

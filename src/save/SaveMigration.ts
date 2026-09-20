@@ -35,6 +35,10 @@ export function migrateSaveFile(saveFile: any): SaveFile {
         migratedFile = migrateToV15(migratedFile);
         migrations.push(`Migrated to v15 (Phase 15 Farming System)`);
         break;
+      case 16:
+        migratedFile = migrateToV16(migratedFile);
+        migrations.push(`Migrated to v16 (Phase 16.1 Animals System)`);
+        break;
       default:
         // Generic migration: ensure defaults for unknown future version
         migratedFile = migrateGeneric(migratedFile, nextVersion);
@@ -274,8 +278,43 @@ function migrateToV15(oldSave: any): any {
   };
 }
 
+function migrateToV16(oldSave: any): any {
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+  const oldAnimals = oldSave.world?.animals ?? { animals: {}, version: 1 };
+
+  const newAnimals = {
+    animals: oldAnimals.animals ?? {},
+    totalCreated: oldAnimals.totalCreated ?? Object.keys(oldAnimals.animals ?? {}).length,
+    totalCollected: oldAnimals.totalCollected ?? 0,
+    totalFed: oldAnimals.totalFed ?? 0,
+    totalPetted: oldAnimals.totalPetted ?? 0,
+    version: 2
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 16,
+    gameVersion: oldSave.gameVersion ?? '0.16.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      farming: oldSave.player?.farming ?? {}
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      animals: newAnimals,
+      farming: oldSave.world?.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} }
+    },
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 16, gameVersion: oldSave.gameVersion ?? '0.16.0' }
+  };
+}
+
 // For future phases:
-// function migrateToV16(saveFile: any): any { ... }
+// function migrateToV17(saveFile: any): any { ... }
 
 export function getMigrationPath(fromVersion: number, toVersion: number = SAVE_VERSION): number[] {
   const path: number[] = [];

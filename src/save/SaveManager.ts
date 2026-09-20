@@ -442,7 +442,7 @@ export class SaveManager {
       eventStates: saveFile.world.eventStates ?? {},
       // future
       farming: saveFile.world.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
-      animals: saveFile.world.animals ?? { animals: {}, version: 1 },
+      animals: saveFile.world.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
       weather: saveFile.world.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
       economy: saveFile.world.economy ?? { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: saveFile.world.dungeons ?? {},
