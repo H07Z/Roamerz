@@ -1,5 +1,5 @@
 /**
- * DebugManager - Phase 8 Homes & Buildings
+ * DebugManager - Phase 11 Player Interaction & Dialogue
  */
 
 export interface MapDebugInfo {
@@ -59,7 +59,20 @@ export interface NPCPathDebugInfo {
   status: string;
   destination: { x: number; y: number } | null;
   start: { x: number; y: number } | null;
-  stats: { requests: number; found: number; failed: number; distance: number; recalculations: number; homeVisits: number; isAtHome: boolean; hasHome: boolean };
+  stats: {
+    requests: number;
+    found: number;
+    failed: number;
+    distance: number;
+    recalculations: number;
+    homeVisits: number;
+    isAtHome: boolean;
+    hasHome: boolean;
+    scheduleChanges: number;
+    currentActivity: string | null;
+    hasSchedule: boolean;
+    activitiesCompleted: Record<string, number>;
+  };
 }
 
 export interface BuildingDebugInfo {
@@ -81,6 +94,75 @@ export interface BuildingDetailInfo {
   ownerId: string | null;
   occupied: boolean;
   occupantId: string | null;
+}
+
+export interface TimeDebugInfo {
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  phase: string;
+  timeScale: number;
+  isPaused: boolean;
+  dayProgress: number;
+  isDaytime: boolean;
+}
+
+export interface ScheduleDebugInfo {
+  count: number;
+  showSchedules: boolean;
+  currentTimeMinutes: number;
+}
+
+export interface ScheduleDetailInfo {
+  npcId: string;
+  currentActivity: string | null;
+  currentEntry: { start: string; end: string; activity: string; destination: string } | null;
+  nextEntry: { start: string; end: string; activity: string } | null;
+  entryCount: number;
+  scheduleChanges: number;
+  enabled: boolean;
+}
+
+export interface LifeDebugInfo {
+  count: number;
+  showNeeds: boolean;
+  showInventory: boolean;
+  showJobs: boolean;
+  averageWellbeing: number;
+  criticalCount: number;
+  interactions: number;
+}
+
+export interface LifeDetailInfo {
+  npcId: string;
+  needs: { energy: number; hunger: number; social: number; happiness: number; health: number; overall: number; lowest: string | null; critical: string[] };
+  inventory: { debug: string; value: number; count: number };
+  job: { type: string; workDone: number; itemsProduced: number; coinsEarned: number; progress: number };
+  stats: { socialInteractions: number; itemsProduced: number; homeVisits: number };
+}
+
+export interface InteractionDebugInfo {
+  hasInteractable: boolean;
+  currentType: string | null;
+  currentId: string | null;
+  currentName: string | null;
+  nearbyCount: number;
+  totalInteractions: number;
+  range: number;
+  prompt: string;
+}
+
+export interface DialogueDebugInfo {
+  isOpen: boolean;
+  isBuildingDialogue: boolean;
+  activeNpcId: string | null;
+  activeNpcName: string | null;
+  currentNodeId: string | null;
+  totalDialogues: number;
+  totalChoices: number;
+  historyCount: number;
+  debug: string;
 }
 
 export class DebugManager {
@@ -111,7 +193,14 @@ export class DebugManager {
   private npcPathInfo: NPCPathDebugInfo[] = [];
   private buildingInfo: BuildingDebugInfo | null = null;
   private buildingDetails: BuildingDetailInfo[] = [];
-  private currentPhase: string = '8';
+  private timeInfo: TimeDebugInfo | null = null;
+  private scheduleInfo: ScheduleDebugInfo | null = null;
+  private scheduleDetails: ScheduleDetailInfo[] = [];
+  private lifeInfo: LifeDebugInfo | null = null;
+  private lifeDetails: LifeDetailInfo[] = [];
+  private interactionInfo: InteractionDebugInfo | null = null;
+  private dialogueInfo: DialogueDebugInfo | null = null;
+  private currentPhase: string = '11';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -151,6 +240,13 @@ export class DebugManager {
   setNPCPathInfo(info: NPCPathDebugInfo[]): void { this.npcPathInfo = info; }
   setBuildingInfo(info: BuildingDebugInfo): void { this.buildingInfo = info; }
   setBuildingDetails(details: BuildingDetailInfo[]): void { this.buildingDetails = details; }
+  setTimeInfo(info: TimeDebugInfo): void { this.timeInfo = info; }
+  setScheduleInfo(info: ScheduleDebugInfo): void { this.scheduleInfo = info; }
+  setScheduleDetails(details: ScheduleDetailInfo[]): void { this.scheduleDetails = details; }
+  setLifeInfo(info: LifeDebugInfo): void { this.lifeInfo = info; }
+  setLifeDetails(details: LifeDetailInfo[]): void { this.lifeDetails = details; }
+  setInteractionInfo(info: InteractionDebugInfo): void { this.interactionInfo = info; }
+  setDialogueInfo(info: DialogueDebugInfo): void { this.dialogueInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -170,17 +266,24 @@ export class DebugManager {
 
     const padding = 10;
     const lineHeight = 11;
-    const boxWidth = 460;
+    const boxWidth = 600;
     const baseHeight = 60;
-    const mapHeight = this.mapInfo ? 25 : 0;
-    const playerHeight = this.playerInfo ? 35 : 0;
-    const cameraHeight = this.cameraInfo ? 25 : 0;
-    const pathfindingHeight = this.pathfindingInfo ? 35 : 0;
-    const buildingHeight = this.buildingInfo ? 35 : 0;
-    const npcHeight = this.npcInfo ? Math.min(120, this.npcInfo.count * lineHeight + 15) : 0;
+    const mapHeight = this.mapInfo ? 15 : 0;
+    const timeHeight = this.timeInfo ? 35 : 0;
+    const playerHeight = this.playerInfo ? 15 : 0;
+    const cameraHeight = this.cameraInfo ? 15 : 0;
+    const pathfindingHeight = this.pathfindingInfo ? 15 : 0;
+    const buildingHeight = this.buildingInfo ? 15 : 0;
+    const scheduleHeight = this.scheduleInfo ? 15 : 0;
+    const lifeHeight = this.lifeInfo ? 15 : 0;
+    const interactionHeight = this.interactionInfo ? 15 : 0;
+    const dialogueHeight = this.dialogueInfo ? 15 : 0;
+    const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
-    const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(100, this.buildingDetails.length * lineHeight + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + npcHeight + npcPathHeight + buildingDetailHeight + 20;
+    const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
+    const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
+    const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
+    const boxHeight = baseHeight + mapHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -201,21 +304,28 @@ export class DebugManager {
     ctx.fillText(`FPS:${this.fps} Time:${this.formatGameTime()} ${this.screenWidth}x${this.screenHeight} Frames:${this.totalFrames}`, x, y);
     y += lineHeight;
 
+    if (this.timeInfo) {
+      ctx.fillStyle = '#8ff';
+      ctx.fillText(`TIME: Day ${this.timeInfo.day} ${String(this.timeInfo.hour).padStart(2,'0')}:${String(this.timeInfo.minute).padStart(2,'0')}:${String(this.timeInfo.second).padStart(2,'0')} Phase ${this.timeInfo.phase} ${this.timeInfo.isDaytime?'☀ DAY':'🌙 NIGHT'} Scale ${this.timeInfo.timeScale}x ${this.timeInfo.isPaused?'PAUSED':''} Progress ${(this.timeInfo.dayProgress*100).toFixed(0)}%`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
     if (this.cameraInfo) {
       ctx.fillStyle = '#8f8';
-      ctx.fillText(`CAMERA: Offset ${Math.floor(this.cameraInfo.x)},${Math.floor(this.cameraInfo.y)} Target ${Math.floor(this.cameraInfo.targetX)},${Math.floor(this.cameraInfo.targetY)} Zoom ${this.cameraInfo.zoom} Smooth ${this.cameraInfo.smoothing}`, x, y);
+      ctx.fillText(`CAMERA: Offset ${Math.floor(this.cameraInfo.x)},${Math.floor(this.cameraInfo.y)} Zoom ${this.cameraInfo.zoom} Smooth ${this.cameraInfo.smoothing}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
 
     if (this.playerInfo) {
-      ctx.fillText(`PLAYER: ${Math.floor(this.playerInfo.x)},${Math.floor(this.playerInfo.y)} Tile ${this.playerInfo.tileX},${this.playerInfo.tileY} ${this.playerInfo.state} ${this.playerInfo.direction} Colliding:${this.collisionInfo?.isColliding?'YES':'NO'}`, x, y);
+      ctx.fillText(`PLAYER: ${Math.floor(this.playerInfo.x)},${Math.floor(this.playerInfo.y)} Tile ${this.playerInfo.tileX},${this.playerInfo.tileY} ${this.playerInfo.state} Colliding:${this.collisionInfo?.isColliding?'YES':'NO'}`, x, y);
       y += lineHeight;
     }
 
     if (this.pathfindingInfo) {
       ctx.fillStyle = '#8f8';
-      ctx.fillText(`PATHFINDING: Grid W:${this.pathfindingInfo.gridCounts.walkable} B:${this.pathfindingInfo.gridCounts.blocked} | Req:${this.pathfindingInfo.totalRequests} OK:${this.pathfindingInfo.successful} Fail:${this.pathfindingInfo.failed} Rate:${(this.pathfindingInfo.successRate*100).toFixed(0)}% | Paths:${this.pathfindingInfo.showPaths?'ON':'OFF'}(N) Nav:${this.pathfindingInfo.showNavGrid?'ON':'OFF'}(M)`, x, y);
+      ctx.fillText(`PATHFINDING: W:${this.pathfindingInfo.gridCounts.walkable} B:${this.pathfindingInfo.gridCounts.blocked} Req:${this.pathfindingInfo.totalRequests} OK:${this.pathfindingInfo.successful} Fail:${this.pathfindingInfo.failed} Rate:${(this.pathfindingInfo.successRate*100).toFixed(0)}% Paths:${this.pathfindingInfo.showPaths?'ON':'OFF'}(N) Nav:${this.pathfindingInfo.showNavGrid?'ON':'OFF'}(M)`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
@@ -223,7 +333,39 @@ export class DebugManager {
     if (this.buildingInfo) {
       ctx.fillStyle = '#8f8';
       const c = this.buildingInfo.counts;
-      ctx.fillText(`BUILDINGS: Total:${c.total} Res:${c.residential} Interior:${c.withInterior} | Doors:${this.buildingInfo.showDoors?'ON':'OFF'}(J) Labels:${this.buildingInfo.showLabels?'ON':'OFF'}(L) Own:${this.buildingInfo.showOwnership?'ON':'OFF'}(U) Front:${this.buildingInfo.showFronts?'ON':'OFF'}(I)`, x, y);
+      ctx.fillText(`BUILDINGS: Total:${c.total} Res:${c.residential} | Doors:${this.buildingInfo.showDoors?'ON':'OFF'}(J) Labels:${this.buildingInfo.showLabels?'ON':'OFF'}(L) Own:${this.buildingInfo.showOwnership?'ON':'OFF'}(U)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.scheduleInfo) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`SCHEDULES: ${this.scheduleInfo.count} NPCs | Time ${Math.floor(this.scheduleInfo.currentTimeMinutes/60)}:${String(this.scheduleInfo.currentTimeMinutes%60).padStart(2,'0')} | Show:${this.scheduleInfo.showSchedules?'ON':'OFF'}(K)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.lifeInfo) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`LIFE: ${this.lifeInfo.count} NPCs AvgWellbeing:${this.lifeInfo.averageWellbeing.toFixed(0)}% Critical:${this.lifeInfo.criticalCount} Interactions:${this.lifeInfo.interactions} Needs:${this.lifeInfo.showNeeds?'ON':'OFF'}(;) Inv:${this.lifeInfo.showInventory?'ON':'OFF'}(,) Jobs:${this.lifeInfo.showJobs?'ON':'OFF'}(.)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.interactionInfo) {
+      ctx.fillStyle = this.interactionInfo.hasInteractable ? '#ff8' : '#aaa';
+      ctx.fillText(`INTERACTION: ${this.interactionInfo.hasInteractable ? `${this.interactionInfo.currentType} ${this.interactionInfo.currentName} (${this.interactionInfo.currentId}) ${this.interactionInfo.nearbyCount} nearby` : 'None'} Total:${this.interactionInfo.totalInteractions} Range:${this.interactionInfo.range}px (E to interact)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+      if (this.interactionInfo.prompt) {
+        ctx.fillText(`  Prompt: ${this.interactionInfo.prompt.substring(0, 80)}`, x, y);
+        y += lineHeight;
+      }
+    }
+
+    if (this.dialogueInfo) {
+      ctx.fillStyle = this.dialogueInfo.isOpen ? '#f8f' : '#aaa';
+      ctx.fillText(`DIALOGUE: ${this.dialogueInfo.isOpen ? `OPEN ${this.dialogueInfo.isBuildingDialogue ? 'Building' : `NPC ${this.dialogueInfo.activeNpcName} (${this.dialogueInfo.activeNpcId}) Node ${this.dialogueInfo.currentNodeId}`}` : 'CLOSED'} Total:${this.dialogueInfo.totalDialogues} Choices:${this.dialogueInfo.totalChoices} Hist:${this.dialogueInfo.historyCount} | 1-4 choose, ESC close`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
@@ -234,20 +376,51 @@ export class DebugManager {
       y += lineHeight;
       ctx.fillStyle = '#ddd';
       for (const npc of this.npcInfo.npcs) {
-        ctx.fillText(`${npc.id} ${npc.name}(${npc.role[0]}) ${npc.state} ${npc.tileX},${npc.tileY}->${Math.floor(npc.targetX/32)},${Math.floor(npc.targetY/32)}`, x, y);
+        ctx.fillText(`${npc.id} ${npc.name}(${npc.role[0]}) ${npc.state} ${npc.tileX},${npc.tileY}`, x, y);
         y += lineHeight;
       }
     }
 
     if (this.npcPathInfo.length > 0) {
       ctx.fillStyle = '#8f8';
-      ctx.fillText(`PATHS:`, x, y);
+      ctx.fillText(`PATHS & SCHEDULES:`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
       for (const p of this.npcPathInfo) {
-        const statusColor = p.status === 'FOUND' || p.status === 'FOLLOWING' ? '#8ff' : p.status.includes('HOME') || p.status === 'AT_HOME' || p.status === 'INSIDE' ? '#fa8' : '#f88';
+        const statusColor = p.status === 'FOUND' || p.status === 'FOLLOWING' ? '#8ff' : p.status.includes('HOME') || p.status.includes('WORK') || p.status.includes('SLEEP') ? '#fa8' : '#f88';
         ctx.fillStyle = statusColor;
-        ctx.fillText(`${p.id} ${p.status} Len:${p.pathLength} Cur:${p.currentNode}/${p.pathLength} Dest:${p.destination?.x},${p.destination?.y} H:${p.stats.homeVisits} ${p.stats.isAtHome?'AT_HOME':''}`, x, y);
+        ctx.fillText(`${p.id} ${p.status} Len:${p.pathLength} H:${p.stats.homeVisits} Sched:${p.stats.scheduleChanges} Act:${p.stats.currentActivity ?? 'none'} ${p.stats.isAtHome?'AT_HOME':''}`, x, y);
+        y += lineHeight;
+        ctx.fillStyle = '#ddd';
+      }
+    }
+
+    if (this.scheduleDetails.length > 0) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`SCHEDULE DETAILS:`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+      for (const s of this.scheduleDetails) {
+        const activityColor = s.currentActivity ? '#8ff' : '#aaa';
+        ctx.fillStyle = activityColor;
+        ctx.fillText(`${s.npcId} ${s.enabled?'ON':'OFF'} ${s.currentActivity ?? 'none'} ${s.currentEntry ? `${s.currentEntry.start}-${s.currentEntry.end} ${s.currentEntry.activity} -> ${s.currentEntry.destination}` : 'no entry'} Next: ${s.nextEntry ? `${s.nextEntry.start} ${s.nextEntry.activity}` : 'none'}`, x, y);
+        y += lineHeight;
+        ctx.fillStyle = '#ddd';
+      }
+    }
+
+    if (this.lifeDetails.length > 0) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`LIFE DETAILS:`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+      for (const l of this.lifeDetails) {
+        const wellbeingColor = l.needs.overall < 30 ? '#f88' : l.needs.overall < 60 ? '#ff8' : '#8f8';
+        ctx.fillStyle = wellbeingColor;
+        ctx.fillText(`${l.npcId} W:${l.needs.overall.toFixed(0)}% E:${l.needs.energy.toFixed(0)} H:${l.needs.hunger.toFixed(0)} S:${l.needs.social.toFixed(0)} Hap:${l.needs.happiness.toFixed(0)} Health:${l.needs.health.toFixed(0)} ${l.needs.critical.length>0?`CRIT:${l.needs.critical.join(',')}`:''} Lowest:${l.needs.lowest ?? 'none'}`, x, y);
+        y += lineHeight;
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(`  ${l.job.type} Work:${l.job.workDone.toFixed(1)}h Prod:${l.job.itemsProduced} Coins:${l.job.coinsEarned} Inv:${l.inventory.debug} Val:${l.inventory.value} Inter:${l.stats.socialInteractions}`, x, y);
         y += lineHeight;
         ctx.fillStyle = '#ddd';
       }
@@ -261,7 +434,7 @@ export class DebugManager {
       for (const b of this.buildingDetails) {
         const occupiedColor = b.occupied ? '#8f8' : '#aaa';
         ctx.fillStyle = occupiedColor;
-        ctx.fillText(`${b.id} ${b.name} ${b.x},${b.y} door ${b.doorX},${b.doorY} owner ${b.ownerId ?? 'none'} ${b.occupied ? `OCCUPIED by ${b.occupantId}` : ''}`, x, y);
+        ctx.fillText(`${b.id} door ${b.doorX},${b.doorY} owner ${b.ownerId ?? 'none'} ${b.occupied ? `OCCUPIED by ${b.occupantId}` : ''}`, x, y);
         y += lineHeight;
         ctx.fillStyle = '#ddd';
       }
@@ -292,7 +465,7 @@ export class DebugManager {
     ctx.fillText('ROAMERZ', canvasWidth / 2, canvasHeight / 2 - 20);
     ctx.font = '11px monospace';
     ctx.fillStyle = 'rgba(180,255,180,0.8)';
-    ctx.fillText(`Phase 8 - NPC Homes & Buildings`, canvasWidth / 2, canvasHeight / 2);
+    ctx.fillText(`Phase 11 - Player Interaction & Dialogue`, canvasWidth / 2, canvasHeight / 2);
     ctx.restore();
   }
 }

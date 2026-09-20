@@ -65,15 +65,23 @@ export class Player {
     deltaTime: number,
     input: InputManager,
     worldMap: WorldMap | null,
-    collisionSystem: CollisionSystem | null = null
+    collisionSystem: CollisionSystem | null = null,
+    isDialogueOpen: boolean = false
   ): void {
+    // Don't move if dialogue is open (Phase 11)
+    if (isDialogueOpen) {
+      this.state = PlayerState.IDLE;
+      this.isColliding = false;
+      return;
+    }
+
     let moveX = 0;
     let moveY = 0;
 
     if (input.isKeyDown('w') || input.isKeyDown('arrowup')) moveY -= 1;
     if (input.isKeyDown('s') || input.isKeyDown('arrowdown')) moveY += 1;
     if (input.isKeyDown('a') || input.isKeyDown('arrowleft')) moveX -= 1;
-    if (input.isKeyDown('d') || input.isKeyDown('arrowright') || input.isKeyDown('e')) moveX += 1;
+    if (input.isKeyDown('d') || input.isKeyDown('arrowright')) moveX += 1;
 
     const isMoving = moveX !== 0 || moveY !== 0;
 

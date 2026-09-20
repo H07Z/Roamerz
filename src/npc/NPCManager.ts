@@ -1,6 +1,6 @@
 /**
- * NPCManager - Phase 8 Homes & Buildings
- * Manages NPCs with pathfinding, navigation grid, pathfinder, and home buildings
+ * NPCManager - Phase 10 NPC Life Simulation
+ * Manages NPCs with pathfinding, navigation grid, pathfinder, home buildings, schedules, and life simulation
  */
 
 import { NPC, NPCData, NPCPoint } from './NPC';
@@ -11,12 +11,18 @@ import { NavigationGrid } from '../pathfinding/NavigationGrid';
 import { Pathfinder } from '../pathfinding/Pathfinder';
 import { CollisionMap } from '../collision/CollisionMap';
 import { BuildingManager } from '../building/BuildingManager';
+import { ScheduleManager } from '../schedule/ScheduleManager';
+import { TimeManager } from '../time/TimeManager';
+import { LifeManager } from '../life/LifeManager';
 
 export class NPCManager {
   private npcs: Map<string, NPC> = new Map();
   private navigationGrid: NavigationGrid | null = null;
   private pathfinder: Pathfinder | null = null;
   private buildingManager: BuildingManager | null = null;
+  private scheduleManager: ScheduleManager | null = null;
+  private timeManager: TimeManager | null = null;
+  private lifeManager: LifeManager | null = null;
 
   constructor() {}
 
@@ -25,9 +31,12 @@ export class NPCManager {
     collisionMap: CollisionMap | null = null,
     navigationGrid: NavigationGrid | null = null,
     pathfinder: Pathfinder | null = null,
-    buildingManager: BuildingManager | null = null
+    buildingManager: BuildingManager | null = null,
+    scheduleManager: ScheduleManager | null = null,
+    timeManager: TimeManager | null = null,
+    lifeManager: LifeManager | null = null
   ): void {
-    console.log('[NPCManager] Initializing Phase 8 - Homes & Buildings...');
+    console.log('[NPCManager] Initializing Phase 10 - Life Simulation...');
 
     this.npcs.clear();
 
@@ -46,7 +55,7 @@ export class NPCManager {
         this.pathfinder.setNavigationGrid(this.navigationGrid);
       }
     } else {
-      this.pathfinder = new Pathfinder(false); // 4-dir for reliability
+      this.pathfinder = new Pathfinder(false);
       if (this.navigationGrid) {
         this.pathfinder.setNavigationGrid(this.navigationGrid);
       }
@@ -55,6 +64,13 @@ export class NPCManager {
 
     // Phase 8: Building manager
     this.buildingManager = buildingManager;
+
+    // Phase 9: Schedule and time managers
+    this.scheduleManager = scheduleManager;
+    this.timeManager = timeManager;
+
+    // Phase 10: Life manager
+    this.lifeManager = lifeManager;
 
     const tileSize = WorldRenderer.TILE_SIZE;
 
@@ -149,34 +165,72 @@ export class NPCManager {
         const homeBuilding = this.buildingManager.getBuilding(def.data.homeId);
         if (homeBuilding) {
           npc.setHomeBuilding(homeBuilding);
+          // Also set work building based on role
+          if (def.data.role === 'shopkeeper') {
+            npc.setWorkBuilding(homeBuilding); // Shop is home for shopkeeper
+          } else if (def.data.role === 'blacksmith') {
+            npc.setWorkBuilding(homeBuilding); // Forge is home for blacksmith
+          }
           console.log(`[NPCManager] ${npc.id} home linked to ${homeBuilding.id} at door ${homeBuilding.door.x},${homeBuilding.door.y}`);
         } else {
           console.warn(`[NPCManager] ${npc.id} home ${def.data.homeId} not found in BuildingManager`);
         }
       }
 
-      if (this.pathfinder) {
-        // Immediately request path to B for testing
+      // Phase 9: Link schedule
+      if (this.scheduleManager) {
+        const schedule = this.scheduleManager.getSchedule(def.data.id);
+        if (schedule) {
+          npc.setSchedule(schedule);
+          // Set initial schedule based on current time
+          if (this.timeManager) {
+            const minutes = this.timeManager.getMinutesSinceMidnight();
+            npc.updateSchedule(minutes, this.buildingManager);
+          }
+          console.log(`[NPCManager] ${npc.id} schedule linked with ${schedule.getEntryCount()} entries`);
+        }
+      }
+
+      // Phase 9: Set work locations for farmer and others
+      if (def.data.role === 'farmer') {
+        npc.setWorkLocation(15 * tileSize + 16, 31 * tileSize + 16); // Farm
+      } else if (def.data.role === 'villager') {
+        npc.setWorkLocation(15 * tileSize + 16, 31 * tileSize + 16); // Farm helping
+      }
+
+      if (this.pathfinder && !this.scheduleManager) {
+        // Only auto-path if no schedule (for testing without time)
         const tileB = { x: Math.floor(def.pointB.x / tileSize), y: Math.floor(def.pointB.y / tileSize) };
         npc.requestPath(tileB);
       }
 
       this.npcs.set(npc.id, npc);
-      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed} home=${def.data.homeId} path to ${def.pointB.x.toFixed(0)},${def.pointB.y.toFixed(0)}`);
+      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed} home=${def.data.homeId} schedule=${npc.getSchedule() ? 'yes' : 'no'}`);
     }
 
-    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs with pathfinding and homes`);
+    // Phase 10: Initialize life simulation if lifeManager provided
+    if (this.lifeManager && this.buildingManager && this.timeManager) {
+      this.lifeManager.initialize(this.getAllNPCs(), this.buildingManager, this.timeManager);
+      console.log(`[NPCManager] Life manager: ${this.lifeManager.getCount()} life entries`);
+    }
+
+    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs with pathfinding, homes, schedules, and life`);
     if (this.navigationGrid) {
       console.log(`[NPCManager] Navigation grid:`, this.navigationGrid.getCounts());
     }
     if (this.buildingManager) {
       console.log(`[NPCManager] Building manager:`, this.buildingManager.getCounts());
     }
+    if (this.scheduleManager) {
+      console.log(`[NPCManager] Schedule manager: ${this.scheduleManager.getCount()} schedules`);
+    }
+    if (this.lifeManager) {
+      console.log(`[NPCManager] Life manager: ${this.lifeManager.getCount()} NPCs, avg wellbeing ${this.lifeManager.getAverageWellbeing().toFixed(0)}%`);
+    }
   }
 
   setBuildingManager(buildingManager: BuildingManager): void {
     this.buildingManager = buildingManager;
-    // Update all NPCs with their home buildings
     for (const npc of this.npcs.values()) {
       if (npc.getHomeId()) {
         const home = buildingManager.getBuilding(npc.getHomeId()!);
@@ -189,6 +243,39 @@ export class NPCManager {
 
   getBuildingManager(): BuildingManager | null {
     return this.buildingManager;
+  }
+
+  setScheduleManager(scheduleManager: ScheduleManager): void {
+    this.scheduleManager = scheduleManager;
+    for (const npc of this.npcs.values()) {
+      const schedule = scheduleManager.getSchedule(npc.id);
+      if (schedule) {
+        npc.setSchedule(schedule);
+      }
+    }
+  }
+
+  getScheduleManager(): ScheduleManager | null {
+    return this.scheduleManager;
+  }
+
+  setTimeManager(timeManager: TimeManager): void {
+    this.timeManager = timeManager;
+  }
+
+  getTimeManager(): TimeManager | null {
+    return this.timeManager;
+  }
+
+  setLifeManager(lifeManager: LifeManager): void {
+    this.lifeManager = lifeManager;
+    if (this.buildingManager && this.timeManager) {
+      lifeManager.initialize(this.getAllNPCs(), this.buildingManager, this.timeManager);
+    }
+  }
+
+  getLifeManager(): LifeManager | null {
+    return this.lifeManager;
   }
 
   setPathfinder(pathfinder: Pathfinder): void {
@@ -213,9 +300,20 @@ export class NPCManager {
     return this.pathfinder;
   }
 
-  update(deltaTime: number, worldMap: WorldMap | null, collisionSystem: CollisionSystem | null): void {
+  update(
+    deltaTime: number,
+    worldMap: WorldMap | null,
+    collisionSystem: CollisionSystem | null,
+    currentMinutes?: number
+  ): void {
+    // Use time manager if available and no minutes provided
+    let minutes = currentMinutes;
+    if (minutes === undefined && this.timeManager) {
+      minutes = this.timeManager.getMinutesSinceMidnight();
+    }
+
     for (const npc of this.npcs.values()) {
-      npc.update(deltaTime, worldMap, collisionSystem);
+      npc.update(deltaTime, worldMap, collisionSystem, minutes, this.buildingManager);
     }
   }
 

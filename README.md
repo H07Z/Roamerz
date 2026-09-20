@@ -12,62 +12,58 @@ PHASE 4  — Collision System [COMPLETE]
 PHASE 5  — Camera System [COMPLETE]
 PHASE 6  — NPC Foundation [COMPLETE]
 PHASE 7  — NPC Pathfinding [COMPLETE]
-PHASE 8  — NPC Homes & Buildings [CURRENT - COMPLETE]
-PHASE 9  — Time & NPC Schedules
-PHASE 10 — NPC Life Simulation
-PHASE 11 — Player Interaction & Dialogue
+PHASE 8  — NPC Homes & Buildings [COMPLETE]
+PHASE 9  — Time & NPC Schedules [COMPLETE]
+PHASE 10 — NPC Life Simulation [COMPLETE]
+PHASE 11 — Player Interaction & Dialogue [CURRENT - COMPLETE]
 PHASE 12 — Exploration & World Expansion
 ```
 
-## Phase 8 - NPC Homes & Buildings [CURRENT]
+## Phase 11 - Player Interaction & Dialogue [CURRENT]
 
 ### Objective
-Buildings as first-class entities with doors, owners, types, interiors. NPCs have homes they return to, occupancy tracking.
+Player can press E near NPC (60px, prioritize NPCs over buildings) to start dialogue; dialogue UI bottom box with NPC name, text, 1-4 choices; role-based dialogue trees data-driven with placeholders {playerName},{npcName},{time},{day},{phase},{wellbeing},{needs},{inventory},{job}; choices have conditions and actions; dialogue affects NPC needs (social++) and inventory gifts; building interaction prompt near door; while dialogue open player movement blocked, time pauses for conversation; interaction range debug, dialogue state debug.
 
-### Buildings
-- 6 buildings: 5 houses + 1 shed
-  - HOUSE001 Farmer's House 12,10 6x5 door 15,14 south FARMHOUSE owner NPC001
-  - HOUSE002 Shopkeeper's House 32,8 6x5 door 34,13 south SHOP owner NPC002
-  - HOUSE003 Blacksmith's Forge 15,25 6x5 door 18,25 north BLACKSMITH owner NPC003
-  - HOUSE004 Villager's Cottage 28,26 6x5 door 30,26 north HOUSE owner NPC004
-  - HOUSE005 Child's Home 5,17 5x4 door 10,19 east HOUSE owner NPC005
-  - SHED001 Farm Shed 9,32 2x2 door 10,34 south SHED no owner
-- BuildingType: HOUSE, SHOP, BLACKSMITH, FARMHOUSE, SHED, INN, STORAGE (7 types)
-- Each building: id, type, name, x,y,width,height, door {x,y,worldX,worldY,facing,isLocked}, ownerId, interior {hasInterior, interiorMapId, entryTile}, occupancy
-- Door facing determines front-of-door tile (where NPC stands)
-- Validation: no overlaps, doors near building
+### Interaction System
+- **InteractionSystem**: range 60px (+20 buildings), nearbyInteractables sorted by distance, prioritize NPC if within 40px or closer than building, currentInteractable closest, totalInteractions, prompt "Press E to talk to {name} ({role})" or "Press E to enter {building}..." 
+- **InteractableType**: NPC, BUILDING, NONE; Interactable {type,id,name,distance,npc?,building?,prompt}
+- **Prompt UI**: bottom center 400x30px black bg, green border NPC blue building, icon 💬 NPC 🏠 building, text prompt centered
+- **Game integration**: update player+NPCs+buildings, E/Enter to interact when prompt, recordInteraction, debug InteractionDebugInfo, O toggle prompt, teleports/path tests blocked when dialogue open
+- **Player fix**: removed 'e' key from moveX right, added isDialogueOpen param to update early return IDLE blocks movement during dialogue
 
-### Building Manager & Renderer
-- BuildingManager: creates from WorldMap, tileToBuilding and doorToBuilding maps, getBuildingAtTile, getBuildingByDoorTile, getHomeForNPC, getCounts (total,residential,withInterior,byType), validate
-- BuildingRenderer: door overlay (brown with knob + facing arrow), label (id+name), ownership (owner + occupied dot), front-of-door (yellow transparent), blocked overlay, zoom-aware
+### Dialogue System
+- **DialogueChoice**: id, text, nextNodeId null=end, condition {need,item,time{start,end},wellbeing}, action {giveItem,takeItem,restoreNeed{type,amount},setFlag,coins}, icon
+- **DialogueNode**: id, speaker NPC|PLAYER, speakerName?, text, choices[], isEnd?, action {restoreNeed,giveItem,coins}
+- **Dialogue**: id,npcId,npcName,role,startNodeId,nodes Map,flags?
+- **DialogueBuilder**: createNode, createChoice, replacePlaceholders(text,context {playerName,npcName,role,time,day,phase,wellbeing,needs,inventory,job}) replaces {playerName},{npcName},{role},{time},{day},{phase},{wellbeing},{needs},{inventory},{job}
+- **DialogueData.createDialogueForNPC**: role-based trees:
+  - Farmer 🌾: start "Ah hello... {npcName}... {time} Day {day} {phase}... wellbeing {wellbeing}% feeling {needs}" Choices crops/grow/help/goodbye → crops (harvested {inventory}, work 6AM-5PM job progress), grow (produce CROP/FOOD inventory {inventory} trade tools), help (needs {needs} need WOOD), hard_work (job {role} purpose energy/happiness linked), sell (3 coins/h earned {inventory} shop HOUSE002), trade_tools (give CROP social++), needs (needs {needs} wellbeing {wellbeing}% explanation), bring_wood (produce every 10s progress), how_farm (farm at 15,31 pathfinding around buildings uses bridge)
+  - Shopkeeper 🏪: "Welcome... {inventory}... wellbeing {wellbeing}% - {needs}" Choices sell/business/trade/goodbye → sell (FOOD/BREAD/POTION buy from farmer shop HOUSE002 8AM-6PM 8 coins/h inventory {inventory}), business (social high at square produce coins progress), trade (inventory {inventory} needs {needs}), need_food (FOOD eating restores hunger 25/s plus inventory), potions (restore health health decays if 2+ critical restores if energy/hunger >70), buy_food (FOOD if had coins social++ home HOUSE002 door 34,13), buy_bread (BREAD better than FOOD produce coins at shop building work location home building)
+  - Blacksmith 🔨: "*clang* Ah visitor! {npcName}... {time}... wellbeing {wellbeing}% - {needs}... inventory {inventory}" Choices make/tool/forge/goodbye → make (TOOL from STONE/WOOD WORK at HOUSE003 7AM-6PM 6 coins/h costs 10 energy/h most tiring produce TOOL/COIN every 10s), tool (TOOL for 20 coins inventory {inventory} progress), forge (home HOUSE003 door 18,25 north sleep restores energy 15/s schedule SLEEP 0-5:30 etc), tiring (energy decays fastest happiness decays when low energy home visits count), bring_coins (need STONE/WOOD produce every 10s real regardless timeScale 60x 10s real=10min game pathfinding to front-of-door not inside BLOCKED)
+  - Villager 👨: "Hello! {npcName}... {time} Day {day} {phase}... wellbeing {wellbeing}% - {needs}... {inventory}... help at farm and socialize at square!" Choices do/village/chat/goodbye → do (help farm 10-12 wander social 1-3PM square job VILLAGER WOOD/COIN 2 coins/h any location schedule WANDER/SOCIAL to keep social high), village (50x40 2000 tiles 1493 walkable 507 blocked 6 buildings 5 houses+1 shed square 25,20 river bridge 36-41,19), chat (social restores 10/s SOCIALIZING when 2 NPCs near <50px and socializing or at square interact gain social+happiness interactions count), nice (happiness affected by other needs restores at home/eating/socializing home HOUSE004 door 30,26 north), keep_talking (social higher gift FLOWERs sometimes inventory {inventory} FLOWERs for social gifts interactions increase)
+  - Child 🧒: "Hi! {npcName} {role}! {time}! wellbeing {wellbeing}% - {needs}... {inventory} - lots of flowers! Want to play?" Choices play/where/flower/bye → play (PLAY restores happiness 1.5x job CHILD FLOWER 0 coins/h 3 happiness/h happiest job work(play) 8AM-5PM), where (square 25,20 wander 17-18:30 home HOUSE005 door 10,19 east 5x4 sleep 0-7 and 19:30-24 eat lunch at home 12-13), flower (FLOWER 🌸 for social gifts when NPCs interact gift flowers inventory {inventory} value 4 coins), fun (energy decays 7/h playing very active happiness increases needs {needs} wellbeing {wellbeing}%)
+  - Generic: fallback about self role job {job} needs {needs} inventory {inventory} live in {home} schedule and needs decay
+- **DialogueManager**: activeDialogue, currentNodeId, history[], totalDialogues/Choices, isOpen, currentNPC, context {playerName,time,day,phase,timeManager,lifeManager,buildingManager}, activeBuildingDialogue {buildingId,buildingName,text}|null, startDialogue(npc,context) gets lifeData needs/inventory/job/home builds context time/day/phase/wellbeing/needs debug inventory debug job debug home, creates dialogue via DialogueData.createDialogueForNPC, replacePlaceholders all nodes, sets speakerName, activeDialogue, currentNodeId=start, isOpen true, totalDialogues++, restores social 5 happiness 3 incrementSocialInteractions, startBuildingDialogue(buildingId,name,type,owner,occupied,occupant,context) text "Building: {name} ({type}) ID:{id} Owned by... Occupied... Time... This is a {type}... Doors are ROAD INTERACTABLE, house BLOCKED, path to front-of-door" sets activeBuildingDialogue isOpen true totalDialogues++, getCurrentNode if building returns building node 1 choice Close else activeDialogue.nodes.get(currentNodeId), makeChoice(choiceId) finds choice pushes history totalChoices++ logs handles actions restoreNeed/giveItem plus restoreSocial 2 if nextNodeId null endDialogue ended true else moves currentNodeId next handles node actions returns {ended,nextNode}, endDialogue clears, isOpen, getActiveDialogue, getCurrentNPC, getActiveBuildingDialogue, isBuildingDialogue, getTotalDialogues/Choices, getHistory, getDebugString
+- **DialogueRenderer**: showInteractionPrompt true, renderInteractionPrompt(ctx,interactionSystem,screenW,screenH) if no interactable return box 400x30 bottom center screenH-80 bg rgba(0,0,0,0.8) border green NPC blue building prompt centered bold 12px icon 💬/🏠, renderDialogue(ctx,dialogueManager,screenW,screenH) if not open return currentNode dim full screen 0.5 box 600x400 center bottom screenH-420 bg rgba(20,20,30,0.95) border blue NPC green PLAYER speaker name bold 14px 🗣️ NPC 👤 You color #8cf/#8f8 dialogue text wrapped wrapText split words handle \n measureText maxWidth 12px white lines max 8 choicesStartY textY+lines*16+20 choiceHeight 30 spacing 5 choice bg rgba(50,50,70,0.8) border rgba(100,100,150,0.5) number #ff8 "1." icon white text #ddd truncated 50 chars instructions "Press 1-4 to choose, ESC to close" 9px #aaa centered bottom, wrapText splits words handles \n measures returns lines
 
-### NPC Homes Integration
-- NPCState extended: GOING_HOME, AT_HOME, INSIDE
-- NPC has homeBuilding, atHomeTimer 3s, insideTimer 5s, homeVisits
-- goHome() → path to front-of-door (fallback door tile), state GOING_HOME
-- followPath() → if goingHome and complete → AT_HOME
-- AT_HOME → wait 3s → enterHome() → INSIDE + building.setOccupied(true,id) + homeVisits++
-- INSIDE → wait 5s → leaveHome() → building.setOccupied(false) → IDLE → alternative target
-- IDLE 30% chance to goHome if has home
-- NPCManager links homeId to building, setBuildingManager updates all
+### Integration Phase 11
+- **Game**: fields interactionSystem, dialogueManager, dialogueRenderer, showInteractionPrompt true, initialize sets interaction range 60 logs ready, update timeManager.update only if !dialogue open (pauses time during dialogue), npcManager.update and lifeManager.update only if !dialogue open (pauses NPCs for conversation), interactionSystem.update always, handleDialogueInput ESC closes dialogue, 1-4 chooses when dialogue open, E/Enter starts dialogue when interactable (NPC → startDialogue with context playerName,time,day,phase,timeManager,lifeManager,buildingManager records interaction; BUILDING → startBuildingDialogue), teleports 1-4 and pathfinding tests 5-9 only when dialogue closed, render order world->NPCs->player->time overlay->clock->timeline->interaction prompt->dialogue->debug->help, debug setInteractionInfo/setDialogueInfo, help Phase 11 header shows interaction current type/name/distance and dialogue OPEN/CLOSED controls E/Enter 1-4 ESC O F12 Q etc
+- **Player**: update now takes isDialogueOpen bool if true IDLE return no movement, fixed E key bug
+- **DebugManager**: Phase 11 currentPhase='11', InteractionDebugInfo {hasInteractable,currentType,currentId,currentName,nearbyCount,totalInteractions,range,prompt} and DialogueDebugInfo {isOpen,isBuildingDialogue,activeNpcId/Name,currentNodeId,totalDialogues,totalChoices,historyCount,debug}, fields interactionInfo, dialogueInfo, setters, boxWidth 600, INTERACTION line yellow when hasInteractable with type/name/id nearby total range prompt, DIALOGUE line magenta when open with OPEN/CLOSED NPC/building node total choices history and instructions 1-4 ESC
+- **Preserved Phase 10**: life counts 5 needs valid inventory valid jobs valid decay eating restores job production wellbeing critical inventory add/remove → PASS, Phase 9 time schedules full coverage activities paths day phases timeScale pause schedule changes → PASS, Phase 8 buildings doors walkable homes valid paths validation etc → PASS, Phase 7 pathfinding nearby around building across bridge blocked no path → PASS
 
-### Debug Building View
-- J toggle doors, L toggle labels, U toggle ownership, I toggle front-of-door
-- Y all NPCs go home, F5-F8 NPC1-4 go home
-- Shows: Building id, name, x,y, door x,y, owner, occupied + occupant
-- Visual: brown door with yellow knob, facing arrow, yellow front tile dashed
-
-### Tests (Phase 8)
-- Test1 building counts: total 6, residential 5, withInterior 5 → PASS
-- Test2 doors walkable: 6 doors in nav grid walkable → PASS
-- Test3 NPC homes valid: 5 NPCs have homeBuilding linked → PASS
-- Test4 paths to home: pathfinder from NPC to front-of-door for each NPC → PASS (all FOUND)
-- Test5 building validation: no overlaps, doors near building → PASS
-- Test6 doors collision walkable: doors are ROAD → WALKABLE/INTERACTABLE not BLOCKED → PASS
-- Test7 front-of-door walkable: 6 fronts walkable in nav grid → PASS
-- Test8 ownership linkage: building owner exists and owner home matches building → PASS
-- Additional: goHome → AT_HOME → INSIDE → leave cycle → PASS, occupancy tracking → PASS
-- Phase 7 preserved: nearby, around building, across bridge, blocked dest, no path, multiple NPCs, stuck, recalc → PASS
+### Tests (Phase 11)
+- Test1 interaction range 60px → PASS
+- Test2 nearby interactables count (depends on pos) → PASS (system works)
+- Test3 dialogue initial closed → PASS
+- Test4 start dialogue with NPC001 → PASS, current node id, speaker, text, choices
+- Test5 make choice → PASS, ended/nextNode
+- Test6 building dialogue → PASS
+- Test7 total interactions >=0 → PASS
+- Test8 total dialogues >0 after tests → PASS
+- Test9 history entries >0 → PASS
+- Test10 player blocked during dialogue → PASS
+- Preserved Phase 10/9/8/7 → PASS (see above)
 
 ### Running
 
@@ -77,166 +73,63 @@ npm run dev
 # http://localhost:5173
 ```
 
-### Controls (Phase 8)
-- **WASD/Arrows** - Move player
+### Controls (Phase 11)
+- **E / Enter** - Interact with closest NPC/building when prompt shows (💬 Press E to talk to {name} ({role}))
+- **1-4** - Choose dialogue option (when dialogue open)
+- **ESC** - Close dialogue
+- **O** - Toggle interaction prompt
+- **F12** - Test dialogue with NPC001
+- **Q** - Toggle schedule debug (when dialogue closed)
+- **Shift+E** - Toggle clock, **F** - Toggle day/night overlay
+- **; , .** - Toggle needs/inventory/jobs
+- **WASD/Arrows** - Move player (blocked during dialogue)
 - **C** - Center on player, **V** - Village
 - **Z** - Zoom 1/1.5/0.75, **X** - Smoothing 5/0/10
-- **K** - Collision overlay (red X blocked, yellow interactable)
-- **N** - Toggle NPC paths (● nodes, yellow current, cyan future, red dest)
-- **M** - Toggle navigation grid (red blocked tint, green walkable)
-- **J** - Toggle building doors (brown door + knob + facing arrow)
-- **L** - Toggle building labels (id+name)
-- **U** - Toggle ownership (owner + occupied)
-- **I** - Toggle front-of-door (yellow transparent + FRONT label + line)
-- **Y** - All NPCs go home, **F5-F8** - NPC1-4 go home
-- **T** - Run all Phase7+8 tests in console
-- **P** - Print NPC + building states
-- **O** - Toggle obstacle at 24,18 (Test6 recalculate)
-- **5/6/7/8/9** - Pathfinding tests (nearby, around building, across bridge, blocked, no path)
-- **1/2/3/4** - Teleport to tree/water/bridge/house
+- **K** - Collision overlay
+- **N** - Toggle NPC paths, **M** - Toggle nav grid
+- **J/L/U/I** - Building doors/labels/ownership/fronts
+- **Space** - Pause/resume time (blocked when dialogue open), **= / +** - Faster x2 max 500x, **- / _** - Slower /2 min 1x, **]** - Advance 1 hour, **[** - Back 1 hour, **\** - Next phase
+- **Y** - All go home, **F5-F8** - NPC1-4 go home, **F9** - Toggle schedules, **F10** - Boost all needs 100%, **F11** - Drain needs critical
+- **T** - Run all Phase7+8+9+10+11 tests, **P** - Print time+NPC+building+schedule+life+interaction+dialogue, **O** - Toggle obstacle
+- **5/6/7/8/9** - Pathfinding tests (blocked when dialogue open), **1/2/3/4** - Teleport (blocked when dialogue open)
 - **G** - Grid, **B** - Tile coords, **` / F2 / D** - Debug, **H** - Help, **R** - Reset
 
 ### Architecture
 
 ```
 src/
-├── building/
-│   ├── BuildingType.ts - 7 types, properties, residential, interior
-│   ├── Building.ts - door, interior, occupancy, front-of-door, blocked tiles
-│   ├── BuildingManager.ts - 6 buildings, tile maps, validation, counts
-│   ├── BuildingRenderer.ts - doors, labels, ownership, fronts, zoom-aware
+├── interaction/
+│   ├── InteractionSystem.ts - range 60px, nearby sorted, prioritize NPC, currentInteractable, prompt, totalInteractions
 │   └── README.md
-├── core/Game.ts - + BuildingManager/Renderer, J/L/U/I/Y/F5-F8, T runs Phase7+8, building debug
-├── core/DebugManager.ts - + buildingInfo, buildingDetails, Phase 8
-├── npc/
-│   ├── NPC.ts - + GOING_HOME,AT_HOME,INSIDE, homeBuilding, goHome(), enter/leave, homeVisits
-│   ├── NPCManager.ts - + buildingManager linking
-│   ├── NPCRenderer.ts - + home indicator ⌂, visits, INSIDE dimmed
+├── dialogue/
+│   ├── Dialogue.ts - DialogueChoice/Node/Dialogue, Builder replacePlaceholders
+│   ├── DialogueData.ts - role-based trees farmer/shopkeeper/blacksmith/villager/child/generic with placeholders
+│   ├── DialogueManager.ts - activeDialogue/currentNodeId/history, startDialogue dynamic context, building dialogue, makeChoice actions
+│   ├── DialogueRenderer.ts - interaction prompt 400x30 bottom, dialogue box 600x400 dim + speaker + wrapped text + choices 1-4 + ESC
 │   └── README.md
-├── pathfinding/ - preserved Phase 7 A*
-├── camera/ - preserved zoom sync
-├── collision/ - doors walkable
+├── life/ - preserved Phase 10 (NeedType, NPCNeeds, NPCInventory, JobType, Job, LifeManager, LifeRenderer)
+├── time/ - preserved Phase 9 (TimeManager, TimeRenderer)
+├── schedule/ - preserved Phase 9 (ScheduleManager 5 schedules)
+├── building/ - preserved Phase 8 (6 buildings, doors, ownership, occupancy)
+├── core/Game.ts - + InteractionSystem/DialogueManager/Renderer, time/npc/life paused when dialogue open, E/Enter/ESC/1-4 handling, render prompt+dialogue top layer, debug interaction/dialogue, T runs Phase7+8+9+10+11
+├── core/DebugManager.ts - + InteractionDebugInfo/DialogueDebugInfo, INTERACTION and DIALOGUE lines, Phase 11 boxWidth 600
+├── player/Player.ts - + isDialogueOpen param blocks movement, fixed E key bug
+├── npc/ - preserved with needs/inventory/job
+├── pathfinding/ - preserved A*
 ├── world/ - 50x40 village
 └── main.ts
 ```
 
 ### Previous Phases
-- Phase 7: A* pathfinding, navigation grid 0/1, path request START→DEST→Find→Validate→Follow→Reach, failure handling WAITING 3s retry max 3 → alternative, stuck detection 10px 0.5s → STUCK → recalc limit 3 cooldown 2s, debug path view N toggle ● nodes
-- Phase 6: NPC foundation 5 NPCs A↔B, role colors, stuck detection
-- Phase 5: Camera follow, clamp, smooth lerp, zoom (fixed WorldRenderer sync)
+- Phase 10: NPC Life Simulation - Needs 5 types decay/restore, Inventory 10 items role-based, Jobs 6 types produce every 10s, LifeManager eating/interactions, LifeRenderer bars
+- Phase 9: Time & Schedules - TimeManager day phases, timeScale 60x, ScheduleManager 5 role schedules full coverage, NPC schedule changes
+- Phase 8: 6 buildings, doors walkable, homes valid, paths to home, occupancy
+- Phase 7: A* pathfinding, navigation grid, path request flow, failure handling WAITING retry, stuck detection, recalc limiting
+- Phase 6: NPC foundation 5 NPCs A↔B, role colors
+- Phase 5: Camera follow, clamp, smooth, zoom sync fixed
 - Phase 4: Collision WALKABLE/BLOCKED/INTERACTABLE, AABB sliding
-- Phase 3: Player 150px/s, 8-dir, IDLE/WALK, boundary clamp
-- Phase 2: Village 50x40=2000 tiles, 8 terrain, square, houses, farm, river+bridge
-- Phase 1: Game loop, renderer, input, debug
-
-## Principles
-Small changes, test before expanding, no unnecessary complexity, modular, data-driven, debug everything, placeholder graphics first
-
-## Phase 7 - NPC Pathfinding (Archive)
-
-### Objective
-Most important phase - A* navigation independent from schedules, robust failure handling.
-
-### Navigation Grid
-- Separate from visual tiles and collision
-- 0=Walkable, 1=Blocked
-- Generated from CollisionMap (WALKABLE/INTERACTABLE→0, BLOCKED→1)
-- 50x40=2000 tiles, 1493 walkable, 507 blocked
-- ASCII debug view available
-
-### A* Pathfinding
-- 4-dir for reliability (no corner cutting), optional 8-dir with corner checks
-- Manhattan heuristic for 4-dir, Octile for 8-dir
-- Open list sorted by f, closed set, open map for lookup
-- Safety abort if nodesVisited > width*height*2
-- Stats: nodesVisited, timeMs
-- Handles start==end, not walkable start/dest
-
-### Pathfinder
-- High-level manager: NavigationGrid + AStar
-- requestPath(start,dest,requesterId) → PathResult {path,success,timeMs,nodesVisited}
-- validatePath() checks if path still walkable (for obstacle added)
-- Recalculation limiting: cooldown 2000ms per NPC, max 3 attempts
-- Stats: total, successful, failed, successRate
-
-### NPC Integration
-- New states: PATHFINDING, FOLLOWING_PATH, WAITING, STUCK, IDLE, WALK
-- requestPath(tile), requestPathToWorld()
-- Flow: START+DEST → Find Path → Validate → Follow node by node → Reached → IDLE → switch target
-- Failure: NO PATH → WAITING 3s → Retry max 3 → Alternative (switch A↔B)
-- Stuck: Detect no progress 0.5s → STUCK → recalculate with cooldown 2s max 3 → WAITING
-- followPath() converts tile to world center, dist<8 advance, complete→IDLE
-- Stats: requests, found, failed, distance, recalculations
-
-### Debug Path View
-- N toggle paths, M toggle nav grid
-- Shows: Path Found, Path Length, Current Node, Destination
-- Visual: cyan line if found, red if failed, nodes ● (gray visited, yellow current 6px pulsing, cyan future 4px), dest red 7px DEST label, NPC→current yellow dashed
-- Example: NPC ↓ ● ● ● ● ● → DESTINATION
-
-### Tests (Phase 7)
-- Test1 nearby (25,20→27,20) length 3 → PASS
-- Test2 around building (10,10→18,10) length 11 detour around HOUSE001 → PASS
-- Test3 across bridge (24,19→42,19) length 19 uses bridge 36-41 → PASS
-- Test4 blocked dest water (38,10) → NO PATH correctly → PASS
-- Test5 no path (0,0 tree border) → NOT_FOUND → PASS
-- Test6 obstacle added at 24,19 → recalculate around → PASS
-- Test7 multiple NPCs 5 simultaneously all FOUND → PASS
-- Failure handling: no freeze/crash/wall/teleport → PASS (WAITING→Retry→Alternative)
-- Stuck detection → PASS (0.5s threshold, cooldown 2s, max 3)
-- Recalculation limiting → PASS (2000ms cooldown)
-- Debug view → PASS (N toggle shows nodes)
-
-### Running
-
-```bash
-npm install
-npm run dev
-# http://localhost:5173
-```
-
-### Controls (Phase 7)
-- **WASD/Arrows** - Move player
-- **C** - Center on player, **V** - Village
-- **Z** - Zoom 1/1.5/0.75, **X** - Smoothing 5/0/10
-- **K** - Collision overlay (red X blocked, yellow interactable)
-- **N** - Toggle NPC paths (● nodes, yellow current, cyan future, red dest)
-- **M** - Toggle navigation grid (red blocked tint, green walkable)
-- **T** - Run all Phase 7 tests in console
-- **O** - Toggle obstacle at 24,18 (Test6 recalculate)
-- **5/6/7/8/9** - Test1-5 for individual NPCs
-- **P** - Print NPC path states, **G** - Grid, **B** - Tile coords
-- **\` / F2** - Debug, **H** - Help, **R** - Reset
-
-### Architecture
-
-```
-src/
-├── core/Game.ts - + NavigationGrid, Pathfinder, NPCManager with pathfinding, debug T/O/5-9
-├── core/DebugManager.ts - + pathfindingInfo, npcPathInfo
-├── pathfinding/
-│   ├── NavigationGrid.ts - 0 walkable 1 blocked separate from visual
-│   ├── Path.ts - nodes, status, currentIndex, validation
-│   ├── AStar.ts - 4-dir A* with heuristic, corner checks, stats
-│   ├── Pathfinder.ts - requestPath, validation, cooldown limiting, stats
-│   └── README.md
-├── npc/
-│   ├── NPC.ts - PATHFINDING/FOLLOWING_PATH/WAITING/STUCK + IDLE/WALK, requestPath, followPath, stuck detection
-│   ├── NPCRenderer.ts - actual A* path rendering with nodes
-│   ├── NPCManager.ts - creates nav grid + pathfinder, 5 NPCs with walkable door starts
-│   └── README.md
-├── camera/...
-├── collision/...
-├── world/...
-└── main.ts
-```
-
-### Previous Phases
-- Phase 6: NPC foundation 5 NPCs A↔B, role colors, stuck detection
-- Phase 5: Camera follow, clamp, smooth lerp, zoom
-- Phase 4: Collision WALKABLE/BLOCKED/INTERACTABLE, AABB sliding
-- Phase 3: Player 150px/s, 8-dir, IDLE/WALK, boundary clamp
-- Phase 2: Village 50x40=2000 tiles, 8 terrain, square, houses, farm, river+bridge
+- Phase 3: Player 150px/s, 8-dir, IDLE/WALK, boundary
+- Phase 2: Village 50x40, 8 terrain, square, houses, farm, river+bridge
 - Phase 1: Game loop, renderer, input, debug
 
 ## Principles

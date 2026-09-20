@@ -1,10 +1,12 @@
 /**
- * NPC - Phase 8 Homes & Buildings
- * Implements navigation/pathfinding with A* + home building integration
+ * NPC - Phase 10 NPC Life Simulation
+ * Implements navigation/pathfinding with A* + home building + time-based schedules + life needs
  * - Receives START and DESTINATION
  * - Find Path → Validate → Follow → Reach
  * - Handles NO PATH, stuck detection, recalculation limiting
  * - Phase 8: Homes, goHome, AT_HOME, INSIDE, building occupancy
+ * - Phase 9: Time-based schedules, activities, day phases
+ * - Phase 10: Needs (energy, hunger, social, happiness, health), inventory, jobs, interactions
  */
 
 import { WorldMap } from '../world/WorldMap';
@@ -13,6 +15,12 @@ import { CollisionSystem } from '../collision/CollisionSystem';
 import { Pathfinder } from '../pathfinding/Pathfinder';
 import { Path, PathNode, PathStatus } from '../pathfinding/Path';
 import { Building } from '../building/Building';
+import { Schedule } from '../schedule/Schedule';
+import { ScheduleEntry } from '../schedule/ScheduleEntry';
+import { ScheduleActivityType } from '../schedule/ScheduleActivityType';
+import { NPCNeeds } from '../life/NPCNeeds';
+import { NPCInventory } from '../life/NPCInventory';
+import { Job } from '../life/Job';
 
 export enum NPCState {
   IDLE = 'IDLE',
@@ -23,7 +31,15 @@ export enum NPCState {
   STUCK = 'STUCK',
   GOING_HOME = 'GOING_HOME',
   AT_HOME = 'AT_HOME',
-  INSIDE = 'INSIDE'
+  INSIDE = 'INSIDE',
+  SLEEPING = 'SLEEPING',
+  WORKING = 'WORKING',
+  EATING = 'EATING',
+  SOCIALIZING = 'SOCIALIZING',
+  FARMING = 'FARMING',
+  SHOPPING = 'SHOPPING',
+  PLAYING = 'PLAYING',
+  WANDERING = 'WANDERING'
 }
 
 export enum NPCDirection {
@@ -99,11 +115,29 @@ export class NPC {
 
   // Phase 8: Building / Home integration
   private homeBuilding: Building | null = null;
+  private workBuilding: Building | null = null;
   private atHomeTimer: number = 0;
   private atHomeDuration: number = 3; // seconds to stay at home before leaving
   private insideTimer: number = 0;
   private insideDuration: number = 5; // seconds inside
   private goingHome: boolean = false;
+
+  // Phase 9: Schedule integration
+  private schedule: Schedule | null = null;
+  private currentScheduleEntry: ScheduleEntry | null = null;
+  private currentActivity: ScheduleActivityType | null = null;
+  private scheduleEnabled: boolean = true;
+  private lastScheduleMinutes: number = -1;
+  private activityTimer: number = 0;
+  private workLocation: { x: number; y: number; tileX: number; tileY: number } | null = null;
+
+  // Phase 10: Life simulation
+  private needs: NPCNeeds | null = null;
+  private inventory: NPCInventory | null = null;
+  private job: Job | null = null;
+  private lastEatTime: number = -10;
+  private socialInteractions: number = 0;
+  private itemsProduced: number = 0;
 
   // For debug
   private totalDistanceTraveled: number = 0;
@@ -111,6 +145,8 @@ export class NPC {
   private pathsFound: number = 0;
   private pathsFailed: number = 0;
   private homeVisits: number = 0;
+  private scheduleChanges: number = 0;
+  private activitiesCompleted: Map<string, number> = new Map();
 
   constructor(data: NPCData, pointA: NPCPoint, pointB: NPCPoint) {
     this.id = data.id;
@@ -203,6 +239,318 @@ export class NPC {
     this.switchToAlternativeTarget();
   }
 
+  // Phase 9: Schedule
+  setSchedule(schedule: Schedule | null): void {
+    this.schedule = schedule;
+    if (schedule) {
+      console.log(`[NPC] ${this.id} schedule set with ${schedule.getEntryCount()} entries`);
+    }
+  }
+
+  getSchedule(): Schedule | null {
+    return this.schedule;
+  }
+
+  getCurrentScheduleEntry(): ScheduleEntry | null {
+    return this.currentScheduleEntry;
+  }
+
+  getCurrentActivity(): ScheduleActivityType | null {
+    return this.currentActivity;
+  }
+
+  setScheduleEnabled(enabled: boolean): void {
+    this.scheduleEnabled = enabled;
+    console.log(`[NPC] ${this.id} schedule ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  isScheduleEnabled(): boolean {
+    return this.scheduleEnabled;
+  }
+
+  setWorkBuilding(building: Building | null): void {
+    this.workBuilding = building;
+  }
+
+  getWorkBuilding(): Building | null {
+    return this.workBuilding;
+  }
+
+  setWorkLocation(x: number, y: number, tileSize: number = 32): void {
+    this.workLocation = {
+      x,
+      y,
+      tileX: Math.floor(x / tileSize),
+      tileY: Math.floor(y / tileSize)
+    };
+  }
+
+  getWorkLocation(): { x: number; y: number; tileX: number; tileY: number } | null {
+    return this.workLocation;
+  }
+
+  // Phase 10: Life simulation
+  setNeeds(needs: NPCNeeds | null): void {
+    this.needs = needs;
+  }
+
+  getNeeds(): NPCNeeds | null {
+    return this.needs;
+  }
+
+  setInventory(inventory: NPCInventory | null): void {
+    this.inventory = inventory;
+  }
+
+  getInventory(): NPCInventory | null {
+    return this.inventory;
+  }
+
+  setJob(job: Job | null): void {
+    this.job = job;
+  }
+
+  getJob(): Job | null {
+    return this.job;
+  }
+
+  getActivityTimer(): number {
+    return this.activityTimer;
+  }
+
+  getLastEatTime(): number {
+    return this.lastEatTime;
+  }
+
+  setLastEatTime(time: number): void {
+    this.lastEatTime = time;
+  }
+
+  incrementSocialInteractions(): void {
+    this.socialInteractions++;
+  }
+
+  getSocialInteractions(): number {
+    return this.socialInteractions;
+  }
+
+  incrementItemsProduced(): void {
+    this.itemsProduced++;
+  }
+
+  getItemsProduced(): number {
+    return this.itemsProduced;
+  }
+
+  // Update schedule based on current time (minutes since midnight)
+  updateSchedule(currentMinutes: number, buildingManager?: any): boolean {
+    if (!this.scheduleEnabled || !this.schedule) return false;
+
+    // Only check if time has changed significantly (every minute) or entry changed
+    if (currentMinutes === this.lastScheduleMinutes && this.currentScheduleEntry !== null) {
+      return false;
+    }
+
+    this.lastScheduleMinutes = currentMinutes;
+    const newEntry = this.schedule.getCurrentEntry(currentMinutes);
+
+    if (!newEntry) {
+      // No entry for current time, keep current activity
+      return false;
+    }
+
+    // Check if entry changed
+    if (this.currentScheduleEntry && this.currentScheduleEntry.startMinutes === newEntry.startMinutes &&
+        this.currentScheduleEntry.activity === newEntry.activity) {
+      // Same entry, no change
+      return false;
+    }
+
+    // Entry changed - handle new activity
+    const oldEntry = this.currentScheduleEntry;
+    this.currentScheduleEntry = newEntry;
+    this.currentActivity = newEntry.activity;
+    this.scheduleChanges++;
+
+    console.log(`[NPC] ${this.id} schedule change: ${oldEntry?.activity ?? 'none'} -> ${newEntry.activity} at ${newEntry.formatTimeRange()} dest ${JSON.stringify(newEntry.destination)}`);
+
+    // Handle activity
+    this.handleScheduleActivityChange(newEntry, buildingManager);
+
+    // Track activity
+    const count = this.activitiesCompleted.get(newEntry.activity) ?? 0;
+    this.activitiesCompleted.set(newEntry.activity, count + 1);
+
+    return true;
+  }
+
+  private handleScheduleActivityChange(entry: ScheduleEntry, buildingManager?: any): void {
+    this.activityTimer = 0;
+
+    switch (entry.activity) {
+      case ScheduleActivityType.SLEEP:
+        // Go home and sleep inside
+        if (this.homeBuilding) {
+          this.goingHome = true;
+          this.state = NPCState.GOING_HOME;
+          // Will transition to SLEEPING when reaches home and enters
+          this.goHome();
+        } else {
+          this.state = NPCState.SLEEPING;
+        }
+        break;
+
+      case ScheduleActivityType.HOME:
+        this.goHome();
+        break;
+
+      case ScheduleActivityType.INSIDE:
+        if (this.homeBuilding) {
+          if (this.isAtHome()) {
+            this.enterHome();
+          } else {
+            this.goHome();
+          }
+        } else {
+          this.state = NPCState.INSIDE;
+        }
+        break;
+
+      case ScheduleActivityType.WORK:
+      case ScheduleActivityType.SHOP:
+      case ScheduleActivityType.FARM:
+        // Go to work location
+        this.goToScheduleDestination(entry, buildingManager);
+        break;
+
+      case ScheduleActivityType.EAT:
+      case ScheduleActivityType.SOCIAL:
+      case ScheduleActivityType.WANDER:
+      case ScheduleActivityType.PLAY:
+      case ScheduleActivityType.PATROL:
+        this.goToScheduleDestination(entry, buildingManager);
+        break;
+
+      default:
+        this.goToScheduleDestination(entry, buildingManager);
+        break;
+    }
+  }
+
+  private goToScheduleDestination(entry: ScheduleEntry, buildingManager?: any): boolean {
+    const dest = entry.destination;
+    const tileSize = WorldRenderer.TILE_SIZE;
+
+    let targetTile: { x: number; y: number } | null = null;
+
+    switch (dest.type) {
+      case 'home':
+        if (this.homeBuilding) {
+          const front = this.homeBuilding.getFrontOfDoorPosition();
+          targetTile = { x: front.tileX, y: front.tileY };
+        } else if (dest.buildingId && buildingManager) {
+          const building = buildingManager.getBuilding(dest.buildingId);
+          if (building) {
+            const front = building.getFrontOfDoorPosition();
+            targetTile = { x: front.tileX, y: front.tileY };
+          }
+        }
+        break;
+
+      case 'building':
+        if (dest.buildingId && buildingManager) {
+          const building = buildingManager.getBuilding(dest.buildingId);
+          if (building) {
+            const front = building.getFrontOfDoorPosition();
+            targetTile = { x: front.tileX, y: front.tileY };
+          }
+        }
+        break;
+
+      case 'tile':
+        if (dest.tile) {
+          targetTile = dest.tile;
+        }
+        break;
+
+      case 'point':
+        if (dest.point) {
+          targetTile = {
+            x: Math.floor(dest.point.x / tileSize),
+            y: Math.floor(dest.point.y / tileSize)
+          };
+        }
+        break;
+
+      case 'square':
+        // Village square at 25,20
+        targetTile = { x: 25, y: 20 };
+        break;
+
+      case 'farm':
+        // Farm area 15,31
+        targetTile = { x: 15, y: 31 };
+        break;
+
+      default:
+        targetTile = { x: 25, y: 20 };
+        break;
+    }
+
+    if (!targetTile) {
+      console.warn(`[NPC] ${this.id} could not resolve destination for ${entry.activity} ${JSON.stringify(dest)}`);
+      return false;
+    }
+
+    // Map activity to state
+    let newState = NPCState.WANDERING;
+    switch (entry.activity) {
+      case ScheduleActivityType.WORK:
+        newState = NPCState.WORKING;
+        break;
+      case ScheduleActivityType.FARM:
+        newState = NPCState.FARMING;
+        break;
+      case ScheduleActivityType.SHOP:
+        newState = NPCState.SHOPPING;
+        break;
+      case ScheduleActivityType.EAT:
+        newState = NPCState.EATING;
+        break;
+      case ScheduleActivityType.SOCIAL:
+        newState = NPCState.SOCIALIZING;
+        break;
+      case ScheduleActivityType.PLAY:
+        newState = NPCState.PLAYING;
+        break;
+      case ScheduleActivityType.WANDER:
+      case ScheduleActivityType.PATROL:
+        newState = NPCState.WANDERING;
+        break;
+      case ScheduleActivityType.HOME:
+        newState = NPCState.GOING_HOME;
+        this.goingHome = true;
+        break;
+      case ScheduleActivityType.SLEEP:
+        newState = NPCState.GOING_HOME;
+        this.goingHome = true;
+        break;
+      case ScheduleActivityType.INSIDE:
+        newState = NPCState.INSIDE;
+        break;
+    }
+
+    // Request path
+    const success = this.requestPath(targetTile);
+    if (success) {
+      // Override state to scheduled state (follow path will handle)
+      // Keep FOLLOWING_PATH but track activity
+      console.log(`[NPC] ${this.id} scheduled ${entry.activity} -> path to ${targetTile.x},${targetTile.y} state ${newState}`);
+    }
+
+    return success;
+  }
+
   /**
    * Request a path to a destination (tile coordinates)
    */
@@ -258,15 +606,65 @@ export class NPC {
     return this.requestPath({ x: tileX, y: tileY });
   }
 
-  update(deltaTime: number, _worldMap: WorldMap | null, _collisionSystem: CollisionSystem | null): void {
+  update(
+    deltaTime: number,
+    _worldMap: WorldMap | null,
+    _collisionSystem: CollisionSystem | null,
+    currentMinutes?: number,
+    buildingManager?: any
+  ): void {
     // Handle recalculation cooldown
     if (this.recalculationCooldown > 0) {
       this.recalculationCooldown -= deltaTime;
     }
 
+    // Phase 9: Update schedule if time provided and enabled
+    if (currentMinutes !== undefined && this.scheduleEnabled && this.schedule) {
+      this.updateSchedule(currentMinutes, buildingManager);
+    }
+
+    // Phase 9: Handle SLEEPING state
+    if (this.state === NPCState.SLEEPING) {
+      this.activityTimer += deltaTime;
+      // Sleeping is long, but if schedule changes, updateSchedule will handle
+      // For now, just stay sleeping, check if should wake based on schedule
+      // If not schedule-driven, wake after some time
+      if (!this.scheduleEnabled) {
+        if (this.activityTimer >= 10) {
+          this.state = NPCState.IDLE;
+          this.idleTimer = 0;
+        }
+      }
+      return;
+    }
+
+    // Phase 9: Handle WORKING, FARMING, SHOPPING, etc. - stay at work location
+    if (
+      this.state === NPCState.WORKING ||
+      this.state === NPCState.FARMING ||
+      this.state === NPCState.SHOPPING ||
+      this.state === NPCState.EATING ||
+      this.state === NPCState.SOCIALIZING ||
+      this.state === NPCState.PLAYING ||
+      this.state === NPCState.WANDERING
+    ) {
+      this.activityTimer += deltaTime;
+
+      // If schedule enabled, activity will be changed by schedule
+      // If not schedule-enabled, wander or idle after some time
+      if (!this.scheduleEnabled) {
+        if (this.activityTimer >= 5) {
+          this.state = NPCState.IDLE;
+          this.idleTimer = 0;
+        }
+      }
+      return;
+    }
+
     // Phase 8: Handle AT_HOME state
     if (this.state === NPCState.AT_HOME) {
       this.atHomeTimer += deltaTime;
+      this.activityTimer += deltaTime;
       if (this.atHomeTimer >= this.atHomeDuration) {
         // Enter inside
         this.enterHome();
@@ -277,7 +675,20 @@ export class NPC {
     // Phase 8: Handle INSIDE state
     if (this.state === NPCState.INSIDE) {
       this.insideTimer += deltaTime;
+      this.activityTimer += deltaTime;
+      // If schedule says SLEEP, stay inside longer
+      if (this.currentActivity === ScheduleActivityType.SLEEP) {
+        // Stay inside until schedule changes
+        return;
+      }
       if (this.insideTimer >= this.insideDuration) {
+        // Only leave if not scheduled to be inside/sleeping
+        if (this.scheduleEnabled && this.currentScheduleEntry) {
+          if (this.currentScheduleEntry.activity === ScheduleActivityType.SLEEP ||
+              this.currentScheduleEntry.activity === ScheduleActivityType.INSIDE) {
+            return; // Stay inside
+          }
+        }
         this.leaveHome();
       }
       return;
@@ -287,7 +698,6 @@ export class NPC {
     if (this.state === NPCState.WAITING) {
       this.pathFailedTimer += deltaTime;
       if (this.pathFailedTimer >= this.pathFailedWaitDuration) {
-        // Retry or choose alternative behavior
         if (this.recalculationAttempts < this.maxRecalculations) {
           this.recalculationAttempts++;
           console.log(`[NPC] ${this.id} retrying path after failure (attempt ${this.recalculationAttempts})`);
@@ -295,10 +705,14 @@ export class NPC {
             this.requestPath(this.destinationTile);
           }
         } else {
-          // Max retries reached, switch to idle and choose alternative (switch target)
           console.log(`[NPC] ${this.id} max retries reached, switching to alternative behavior`);
           this.recalculationAttempts = 0;
-          this.switchToAlternativeTarget();
+          if (this.scheduleEnabled && this.currentScheduleEntry) {
+            // Retry schedule destination
+            this.goToScheduleDestination(this.currentScheduleEntry, buildingManager);
+          } else {
+            this.switchToAlternativeTarget();
+          }
         }
       }
       return;
@@ -308,7 +722,6 @@ export class NPC {
     if (this.state === NPCState.STUCK) {
       this.stuckTime += deltaTime;
       if (this.stuckTime >= 1) {
-        // Try to recalculate
         if (this.recalculationCooldown <= 0 && this.recalculationAttempts < this.maxRecalculations) {
           this.recalculationAttempts++;
           this.recalculationCooldown = this.recalculationCooldownDuration;
@@ -332,6 +745,11 @@ export class NPC {
       this.idleTimer += deltaTime;
       if (this.idleTimer >= this.idleDuration) {
         this.idleTimer = 0;
+        // If schedule enabled, let schedule drive behavior, don't random wander
+        if (this.scheduleEnabled && this.currentScheduleEntry) {
+          // Stay idle until schedule changes
+          return;
+        }
         // Phase 8: Occasionally go home (30% chance if has home)
         if (this.homeBuilding && Math.random() < 0.3) {
           this.goHome();
@@ -342,7 +760,7 @@ export class NPC {
       return;
     }
 
-    // Phase 8: GOING_HOME is similar to FOLLOWING_PATH but with home logic
+    // Phase 8+9: GOING_HOME is similar to FOLLOWING_PATH but with home logic
     if (this.state === NPCState.GOING_HOME || this.state === NPCState.FOLLOWING_PATH) {
       if (!this.path || this.path.isFailed()) {
         console.warn(`[NPC] ${this.id} following but no valid path`);
@@ -351,7 +769,6 @@ export class NPC {
         return;
       }
 
-      // Validate path still walkable (in case obstacle added)
       if (this.pathfinder && !this.pathfinder.validatePath(this.path)) {
         console.warn(`[NPC] ${this.id} path invalidated (obstacle added), recalculating`);
         if (this.recalculationCooldown <= 0 && this.recalculationAttempts < this.maxRecalculations) {
@@ -369,12 +786,10 @@ export class NPC {
 
       this.followPath(deltaTime);
 
-      // Stuck detection - check if making progress
       const distMoved = Math.sqrt((this.x - this.lastX) ** 2 + (this.y - this.lastY) ** 2);
       this.totalDistanceTraveled += distMoved;
 
       if (distMoved < this.progressThreshold * deltaTime) {
-        // Not making enough progress
         this.stuckTime += deltaTime;
         if (this.stuckTime >= this.stuckThreshold) {
           console.warn(`[NPC] ${this.id} stuck detected at ${this.x.toFixed(0)},${this.y.toFixed(0)}`);
@@ -424,6 +839,9 @@ export class NPC {
         this.state = NPCState.AT_HOME;
         this.atHomeTimer = 0;
         console.log(`[NPC] ${this.id} arrived home ${this.homeBuilding.id}`);
+      } else if (this.currentActivity) {
+        // Schedule activity reached
+        this.transitionToActivityState(this.currentActivity);
       } else {
         this.state = NPCState.IDLE;
         this.idleTimer = 0;
@@ -452,7 +870,12 @@ export class NPC {
         if (this.goingHome && this.homeBuilding) {
           this.state = NPCState.AT_HOME;
           this.atHomeTimer = 0;
+          this.activityTimer = 0;
           console.log(`[NPC] ${this.id} reached home ${this.homeBuilding.id} at ${currentNode.x},${currentNode.y}`);
+        } else if (this.currentActivity) {
+          // Phase 9: Reached scheduled activity destination
+          this.transitionToActivityState(this.currentActivity);
+          console.log(`[NPC] ${this.id} reached scheduled ${this.currentActivity} at ${currentNode.x},${currentNode.y}`);
         } else {
           this.state = NPCState.IDLE;
           this.idleTimer = 0;
@@ -475,6 +898,63 @@ export class NPC {
 
     this.x += dirX * this.speed * deltaTime;
     this.y += dirY * this.speed * deltaTime;
+  }
+
+  private transitionToActivityState(activity: ScheduleActivityType): void {
+    this.activityTimer = 0;
+    this.goingHome = false;
+
+    switch (activity) {
+      case ScheduleActivityType.SLEEP:
+        // If at home, enter and sleep
+        if (this.homeBuilding && this.isAtHome()) {
+          this.enterHome();
+          this.state = NPCState.SLEEPING;
+          if (this.homeBuilding) {
+            this.homeBuilding.setOccupied(true, this.id);
+          }
+        } else {
+          this.state = NPCState.SLEEPING;
+        }
+        break;
+      case ScheduleActivityType.HOME:
+        this.state = NPCState.AT_HOME;
+        this.atHomeTimer = 0;
+        break;
+      case ScheduleActivityType.INSIDE:
+        if (this.homeBuilding) {
+          this.enterHome();
+        } else {
+          this.state = NPCState.INSIDE;
+        }
+        break;
+      case ScheduleActivityType.WORK:
+        this.state = NPCState.WORKING;
+        break;
+      case ScheduleActivityType.FARM:
+        this.state = NPCState.FARMING;
+        break;
+      case ScheduleActivityType.SHOP:
+        this.state = NPCState.SHOPPING;
+        break;
+      case ScheduleActivityType.EAT:
+        this.state = NPCState.EATING;
+        break;
+      case ScheduleActivityType.SOCIAL:
+        this.state = NPCState.SOCIALIZING;
+        break;
+      case ScheduleActivityType.PLAY:
+        this.state = NPCState.PLAYING;
+        break;
+      case ScheduleActivityType.WANDER:
+      case ScheduleActivityType.PATROL:
+        this.state = NPCState.WANDERING;
+        break;
+      default:
+        this.state = NPCState.IDLE;
+        this.idleTimer = 0;
+        break;
+    }
   }
 
   private switchToAlternativeTarget(): void {
@@ -549,7 +1029,33 @@ export class NPC {
     return this.startTile;
   }
 
-  getStats(): { requests: number; found: number; failed: number; distance: number; recalculations: number; homeVisits: number; isAtHome: boolean; hasHome: boolean } {
+  getStats(): {
+    requests: number;
+    found: number;
+    failed: number;
+    distance: number;
+    recalculations: number;
+    homeVisits: number;
+    isAtHome: boolean;
+    hasHome: boolean;
+    scheduleChanges: number;
+    currentActivity: string | null;
+    hasSchedule: boolean;
+    activitiesCompleted: Record<string, number>;
+    socialInteractions: number;
+    itemsProduced: number;
+    hasNeeds: boolean;
+    hasInventory: boolean;
+    hasJob: boolean;
+    overallWellbeing: number;
+  } {
+    const activities: Record<string, number> = {};
+    for (const [key, value] of this.activitiesCompleted.entries()) {
+      activities[key] = value;
+    }
+
+    const overallWellbeing = this.needs ? this.needs.getOverallWellbeing() : 0;
+
     return {
       requests: this.pathRequests,
       found: this.pathsFound,
@@ -557,8 +1063,18 @@ export class NPC {
       distance: this.totalDistanceTraveled,
       recalculations: this.recalculationAttempts,
       homeVisits: this.homeVisits,
-      isAtHome: this.state === NPCState.AT_HOME || this.state === NPCState.INSIDE,
-      hasHome: this.homeBuilding !== null
+      isAtHome: this.state === NPCState.AT_HOME || this.state === NPCState.INSIDE || this.state === NPCState.SLEEPING,
+      hasHome: this.homeBuilding !== null,
+      scheduleChanges: this.scheduleChanges,
+      currentActivity: this.currentActivity,
+      hasSchedule: this.schedule !== null,
+      activitiesCompleted: activities,
+      socialInteractions: this.socialInteractions,
+      itemsProduced: this.itemsProduced,
+      hasNeeds: this.needs !== null,
+      hasInventory: this.inventory !== null,
+      hasJob: this.job !== null,
+      overallWellbeing: overallWellbeing
     };
   }
 

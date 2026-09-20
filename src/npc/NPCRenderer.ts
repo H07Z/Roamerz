@@ -1,12 +1,14 @@
 /**
- * NPCRenderer - Phase 8 Homes & Buildings
- * Renders NPCs and debug path visualization with nodes + home indicators
+ * NPCRenderer - Phase 10 NPC Life Simulation
+ * Renders NPCs and debug path visualization with nodes + home + schedule + life indicators
  */
 
 import { NPC, NPCState } from './NPC';
 import { WorldRenderer } from '../world/WorldRenderer';
 import { Camera } from '../camera/Camera';
 import { PathStatus } from '../pathfinding/Path';
+import { getActivityProperties } from '../schedule/ScheduleActivityType';
+import { NeedType, getNeedProperties } from '../life/NeedType';
 
 export class NPCRenderer {
   private walkAnimTime: Map<string, number> = new Map();
@@ -83,7 +85,7 @@ export class NPCRenderer {
     ctx.arc(x + dirOffset.x * s, y - 8 * s + bobOffset + dirOffset.y * s, 2 * s, 0, Math.PI * 2);
     ctx.fill();
 
-    // State color: IDLE green, WALK/FOLLOWING yellow, PATHFINDING blue, WAITING/STUCK red, GOING_HOME purple, AT_HOME orange, INSIDE dark
+    // State color: IDLE green, WALK/FOLLOWING yellow, PATHFINDING blue, WAITING/STUCK red, GOING_HOME purple, AT_HOME orange, INSIDE dark, schedule activities distinct
     let stateColor = '#8f8';
     if (npc.state === NPCState.WALK || npc.state === NPCState.FOLLOWING_PATH) stateColor = '#ff8';
     else if (npc.state === NPCState.PATHFINDING) stateColor = '#88f';
@@ -91,6 +93,14 @@ export class NPCRenderer {
     else if (npc.state === NPCState.GOING_HOME) stateColor = '#f8f';
     else if (npc.state === NPCState.AT_HOME) stateColor = '#fa8';
     else if (npc.state === NPCState.INSIDE) stateColor = '#888';
+    else if (npc.state === NPCState.SLEEPING) stateColor = '#88f';
+    else if (npc.state === NPCState.WORKING) stateColor = '#f55';
+    else if (npc.state === NPCState.FARMING) stateColor = '#5a5';
+    else if (npc.state === NPCState.SHOPPING) stateColor = '#fa0';
+    else if (npc.state === NPCState.EATING) stateColor = '#5f5';
+    else if (npc.state === NPCState.SOCIALIZING) stateColor = '#f5f';
+    else if (npc.state === NPCState.PLAYING) stateColor = '#fa5';
+    else if (npc.state === NPCState.WANDERING) stateColor = '#5af';
     ctx.fillStyle = stateColor;
     ctx.beginPath();
     ctx.arc(x + 9 * s, y - 12 * s + bobOffset, 2.5 * s, 0, Math.PI * 2);
@@ -103,6 +113,23 @@ export class NPCRenderer {
       ctx.font = `${7 * s}px monospace`;
       ctx.textAlign = 'center';
       ctx.fillText(`⌂ ${home.id}`, x, y - 28 * s + bobOffset);
+    }
+
+    // Phase 9: Schedule activity indicator
+    const currentActivity = npc.getCurrentActivity();
+    const scheduleEntry = npc.getCurrentScheduleEntry();
+    if (currentActivity) {
+      try {
+        const props = getActivityProperties(currentActivity as any);
+        ctx.fillStyle = props.color;
+        ctx.font = `${Math.max(7, 8 * s)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${props.icon} ${props.name}`, x, y - 36 * s + bobOffset);
+      } catch {
+        ctx.fillStyle = '#fff';
+        ctx.font = `${7 * s}px monospace`;
+        ctx.fillText(`${currentActivity}`, x, y - 36 * s + bobOffset);
+      }
     }
 
     // Name
@@ -118,26 +145,85 @@ export class NPCRenderer {
     ctx.font = `${7 * s}px monospace`;
     ctx.fillText(npc.id, x, y + 30 * s);
 
-    // Path status + home visits
+    // Path status + home visits + schedule + life
     const path = npc.getPath();
     const stats = npc.getStats();
     if (path) {
       ctx.fillStyle = path.isFound() ? '#8f8' : '#f88';
       ctx.font = `${7 * s}px monospace`;
-      ctx.fillText(`${path.status} ${path.getLength()} H:${stats.homeVisits}`, x, y + 38 * s);
+      ctx.fillText(`${path.status} ${path.getLength()} H:${stats.homeVisits} S:${stats.scheduleChanges} W:${stats.overallWellbeing.toFixed(0)}%`, x, y + 38 * s);
     } else {
       ctx.fillStyle = '#aaa';
       ctx.font = `${7 * s}px monospace`;
-      ctx.fillText(`H:${stats.homeVisits} ${npc.state}`, x, y + 38 * s);
+      const activityShort = currentActivity ? currentActivity.substring(0, 4) : npc.state.substring(0, 4);
+      ctx.fillText(`H:${stats.homeVisits} S:${stats.scheduleChanges} W:${stats.overallWellbeing.toFixed(0)}% ${activityShort}`, x, y + 38 * s);
     }
 
-    // If INSIDE, show dimmed and house icon
-    if (npc.state === NPCState.INSIDE) {
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    // Phase 10: Needs bars (small, above activity)
+    const needs = npc.getNeeds();
+    if (needs && npc.state !== NPCState.INSIDE) {
+      const needsData = needs.getNeedsData();
+      const needsList: { type: NeedType; value: number }[] = [
+        { type: NeedType.ENERGY, value: needsData.energy },
+        { type: NeedType.HUNGER, value: needsData.hunger },
+        { type: NeedType.SOCIAL, value: needsData.social },
+        { type: NeedType.HEALTH, value: needsData.health }
+      ];
+
+      const barWidth = 32 * s;
+      const barHeight = 3 * s;
+      const spacing = 1 * s;
+      const startY = y - 44 * s;
+
+      needsList.forEach((need, index) => {
+        const props = getNeedProperties(need.type);
+        const barY = startY - index * (barHeight + spacing);
+        const fillWidth = (need.value / 100) * barWidth;
+        const barX = x - barWidth / 2;
+
+        // Background
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+
+        // Fill
+        let color = props.color;
+        if (need.value < props.criticalThreshold) {
+          color = props.criticalColor;
+        }
+        ctx.fillStyle = color;
+        ctx.fillRect(barX, barY, fillWidth, barHeight);
+      });
+    }
+
+    // Phase 10: Inventory indicator
+    const inventory = npc.getInventory();
+    if (inventory && npc.state !== NPCState.INSIDE) {
+      const invText = inventory.getDebugString();
+      if (invText && invText !== 'Empty') {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.font = `${6 * s}px monospace`;
+        const metrics = ctx.measureText(invText);
+        ctx.fillRect(x - metrics.width / 2 - 2, y + 44 * s, metrics.width + 4, 8 * s);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.fillText(invText, x, y + 50 * s);
+      }
+    }
+
+    // If INSIDE or SLEEPING, show dimmed and house icon
+    if (npc.state === NPCState.INSIDE || npc.state === NPCState.SLEEPING) {
+      ctx.fillStyle = npc.state === NPCState.SLEEPING ? 'rgba(0,0,50,0.6)' : 'rgba(0,0,0,0.5)';
       ctx.fillRect(x - 12 * s, y - 18 * s, 24 * s, 30 * s);
       ctx.fillStyle = '#fff';
       ctx.font = `${12 * s}px monospace`;
-      ctx.fillText('⌂', x, y - 2 * s);
+      ctx.fillText(npc.state === NPCState.SLEEPING ? '💤' : '⌂', x, y - 2 * s);
+    }
+
+    // If WORKING, show work icon
+    if (npc.state === NPCState.WORKING || npc.state === NPCState.FARMING || npc.state === NPCState.SHOPPING) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = `${10 * s}px monospace`;
+      ctx.fillText('⚒', x, y - 2 * s + bobOffset);
     }
 
     ctx.restore();
