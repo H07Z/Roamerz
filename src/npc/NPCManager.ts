@@ -1,28 +1,54 @@
 /**
- * NPCManager - Phase 6
- * Manages all NPCs, updates, and provides access
+ * NPCManager - Phase 7 Pathfinding
+ * Manages NPCs with pathfinding, navigation grid, pathfinder
  */
 
 import { NPC, NPCData, NPCPoint } from './NPC';
 import { WorldMap } from '../world/WorldMap';
 import { CollisionSystem } from '../collision/CollisionSystem';
 import { WorldRenderer } from '../world/WorldRenderer';
+import { NavigationGrid } from '../pathfinding/NavigationGrid';
+import { Pathfinder } from '../pathfinding/Pathfinder';
+import { CollisionMap } from '../collision/CollisionMap';
 
 export class NPCManager {
   private npcs: Map<string, NPC> = new Map();
+  private navigationGrid: NavigationGrid | null = null;
+  private pathfinder: Pathfinder | null = null;
 
   constructor() {}
 
-  initialize(worldMap: WorldMap | null): void {
-    console.log('[NPCManager] Initializing Phase 6 - NPC Foundation...');
+  initialize(worldMap: WorldMap | null, collisionMap: CollisionMap | null = null, navigationGrid: NavigationGrid | null = null, pathfinder: Pathfinder | null = null): void {
+    console.log('[NPCManager] Initializing Phase 7 - NPC Pathfinding...');
 
     this.npcs.clear();
 
+    // Setup navigation grid and pathfinder
+    if (navigationGrid) {
+      this.navigationGrid = navigationGrid;
+    } else if (collisionMap) {
+      this.navigationGrid = NavigationGrid.fromCollisionMap(collisionMap);
+    } else if (worldMap) {
+      this.navigationGrid = NavigationGrid.fromWorldMap(worldMap);
+    }
+
+    if (pathfinder) {
+      this.pathfinder = pathfinder;
+      if (this.navigationGrid) {
+        this.pathfinder.setNavigationGrid(this.navigationGrid);
+      }
+    } else {
+      this.pathfinder = new Pathfinder(false); // 4-dir for reliability
+      if (this.navigationGrid) {
+        this.pathfinder.setNavigationGrid(this.navigationGrid);
+      }
+      this.pathfinder.setRecalculationCooldown(2000);
+    }
+
     const tileSize = WorldRenderer.TILE_SIZE;
 
-    // Define 5 NPCs as per Phase 6 spec
-    // Each has two points to move between for testing movement without pathfinding
-
+    // Define 5 NPCs - now with pathfinding, they will navigate around obstacles
+    // PointA and PointB must be walkable (not inside HOUSE which is BLOCKED)
     const npcDefinitions: { data: NPCData; pointA: NPCPoint; pointB: NPCPoint }[] = [
       {
         data: {
@@ -36,7 +62,7 @@ export class NPCManager {
           state: 'IDLE' as any,
           homeId: 'HOUSE001'
         },
-        pointA: { x: 15 * tileSize + 16, y: 31 * tileSize + 16 }, // Farm
+        pointA: { x: 15 * tileSize + 16, y: 31 * tileSize + 16 }, // Farm (walkable)
         pointB: { x: 25 * tileSize + 16, y: 20 * tileSize + 16 }  // Village square
       },
       {
@@ -44,14 +70,14 @@ export class NPCManager {
           id: 'NPC002',
           name: 'Shopkeeper',
           role: 'shopkeeper',
-          x: 32 * tileSize + 16,
+          x: 34 * tileSize + 16,
           y: 13 * tileSize + 16,
           speed: 35,
           direction: 'down' as any,
-          state: 'WALK' as any,
+          state: 'IDLE' as any,
           homeId: 'HOUSE002'
         },
-        pointA: { x: 32 * tileSize + 16, y: 13 * tileSize + 16 }, // Near shop (HOUSE002)
+        pointA: { x: 34 * tileSize + 16, y: 13 * tileSize + 16 }, // Door of HOUSE002 (walkable ROAD)
         pointB: { x: 22 * tileSize + 16, y: 18 * tileSize + 16 }  // Square
       },
       {
@@ -59,14 +85,14 @@ export class NPCManager {
           id: 'NPC003',
           name: 'Blacksmith',
           role: 'blacksmith',
-          x: 15 * tileSize + 16,
+          x: 18 * tileSize + 16,
           y: 25 * tileSize + 16,
           speed: 30,
           direction: 'right' as any,
           state: 'IDLE' as any,
           homeId: 'HOUSE003'
         },
-        pointA: { x: 15 * tileSize + 16, y: 25 * tileSize + 16 }, // HOUSE003
+        pointA: { x: 18 * tileSize + 16, y: 25 * tileSize + 16 }, // Door of HOUSE003 (walkable)
         pointB: { x: 28 * tileSize + 16, y: 20 * tileSize + 16 }  // Square / workshop
       },
       {
@@ -74,14 +100,14 @@ export class NPCManager {
           id: 'NPC004',
           name: 'Villager',
           role: 'villager',
-          x: 28 * tileSize + 16,
+          x: 30 * tileSize + 16,
           y: 26 * tileSize + 16,
           speed: 45,
           direction: 'up' as any,
-          state: 'WALK' as any,
+          state: 'IDLE' as any,
           homeId: 'HOUSE004'
         },
-        pointA: { x: 28 * tileSize + 16, y: 26 * tileSize + 16 }, // HOUSE004
+        pointA: { x: 30 * tileSize + 16, y: 26 * tileSize + 16 }, // Door of HOUSE004
         pointB: { x: 24 * tileSize + 16, y: 19 * tileSize + 16 }  // Square
       },
       {
@@ -89,25 +115,56 @@ export class NPCManager {
           id: 'NPC005',
           name: 'Child',
           role: 'child',
-          x: 5 * tileSize + 16,
-          y: 17 * tileSize + 16,
+          x: 10 * tileSize + 16,
+          y: 19 * tileSize + 16,
           speed: 60,
           direction: 'right' as any,
           state: 'IDLE' as any,
           homeId: 'HOUSE005'
         },
-        pointA: { x: 5 * tileSize + 16, y: 17 * tileSize + 16 },  // HOUSE005
+        pointA: { x: 10 * tileSize + 16, y: 19 * tileSize + 16 },  // Door of HOUSE005
         pointB: { x: 25 * tileSize + 16, y: 17 * tileSize + 16 }  // Near square playground
       }
     ];
 
     for (const def of npcDefinitions) {
       const npc = new NPC(def.data, def.pointA, def.pointB);
+      if (this.pathfinder) {
+        npc.setPathfinder(this.pathfinder);
+        // Immediately request path to B for testing
+        const tileB = { x: Math.floor(def.pointB.x / tileSize), y: Math.floor(def.pointB.y / tileSize) };
+        npc.requestPath(tileB);
+      }
       this.npcs.set(npc.id, npc);
-      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed}`);
+      console.log(`[NPCManager] Created ${npc.id} - ${npc.name} (${npc.role}) at ${npc.x.toFixed(0)},${npc.y.toFixed(0)} speed=${npc.speed} path to ${def.pointB.x.toFixed(0)},${def.pointB.y.toFixed(0)}`);
     }
 
-    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs`);
+    console.log(`[NPCManager] Initialized ${this.npcs.size} NPCs with pathfinding`);
+    if (this.navigationGrid) {
+      console.log(`[NPCManager] Navigation grid:`, this.navigationGrid.getCounts());
+    }
+  }
+
+  setPathfinder(pathfinder: Pathfinder): void {
+    this.pathfinder = pathfinder;
+    for (const npc of this.npcs.values()) {
+      npc.setPathfinder(pathfinder);
+    }
+  }
+
+  setNavigationGrid(grid: NavigationGrid): void {
+    this.navigationGrid = grid;
+    if (this.pathfinder) {
+      this.pathfinder.setNavigationGrid(grid);
+    }
+  }
+
+  getNavigationGrid(): NavigationGrid | null {
+    return this.navigationGrid;
+  }
+
+  getPathfinder(): Pathfinder | null {
+    return this.pathfinder;
   }
 
   update(deltaTime: number, worldMap: WorldMap | null, collisionSystem: CollisionSystem | null): void {
@@ -132,7 +189,6 @@ export class NPCManager {
     return this.npcs.size;
   }
 
-  // For debugging
   getNPCsNear(x: number, y: number, radius: number): NPC[] {
     const result: NPC[] = [];
     for (const npc of this.npcs.values()) {
@@ -142,5 +198,18 @@ export class NPCManager {
       if (dist <= radius) result.push(npc);
     }
     return result;
+  }
+
+  // For Phase 7 tests
+  requestAllToDestination(tileX: number, tileY: number): void {
+    for (const npc of this.npcs.values()) {
+      npc.requestPath({ x: tileX, y: tileY });
+    }
+  }
+
+  getStats(): { totalRequests: number; successful: number; failed: number } {
+    if (!this.pathfinder) return { totalRequests: 0, successful: 0, failed: 0 };
+    const stats = this.pathfinder.getStats();
+    return { totalRequests: stats.total, successful: stats.successful, failed: stats.failed };
   }
 }
