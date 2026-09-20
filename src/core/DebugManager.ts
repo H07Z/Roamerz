@@ -1,5 +1,5 @@
 /**
- * DebugManager - Phase 11 Player Interaction & Dialogue
+ * DebugManager - Phase 12 Exploration & World Expansion
  */
 
 export interface MapDebugInfo {
@@ -165,6 +165,31 @@ export interface DialogueDebugInfo {
   debug: string;
 }
 
+export interface ExplorationDebugInfo {
+  currentMapId: string;
+  currentMapName: string;
+  discovered: number;
+  total: number;
+  percentage: number;
+  totalDiscovered: number;
+  totalTiles: number;
+  totalPercentage: number;
+  visionRadius: number;
+  transitions: number;
+  showFog: boolean;
+  showMinimap: boolean;
+  debug: string;
+}
+
+export interface WorldDebugInfo {
+  currentMapId: string;
+  currentMapName: string;
+  mapCount: number;
+  allMaps: { id: string; name: string; width: number; height: number; tileCount: number }[];
+  playerMapId: string;
+}
+
+
 export class DebugManager {
   private fps: number = 0;
   private frameCount: number = 0;
@@ -200,7 +225,9 @@ export class DebugManager {
   private lifeDetails: LifeDetailInfo[] = [];
   private interactionInfo: InteractionDebugInfo | null = null;
   private dialogueInfo: DialogueDebugInfo | null = null;
-  private currentPhase: string = '11';
+  private explorationInfo: ExplorationDebugInfo | null = null;
+  private worldInfo: WorldDebugInfo | null = null;
+  private currentPhase: string = '12';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -247,6 +274,8 @@ export class DebugManager {
   setLifeDetails(details: LifeDetailInfo[]): void { this.lifeDetails = details; }
   setInteractionInfo(info: InteractionDebugInfo): void { this.interactionInfo = info; }
   setDialogueInfo(info: DialogueDebugInfo): void { this.dialogueInfo = info; }
+  setExplorationInfo(info: ExplorationDebugInfo): void { this.explorationInfo = info; }
+  setWorldInfo(info: WorldDebugInfo): void { this.worldInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -266,9 +295,11 @@ export class DebugManager {
 
     const padding = 10;
     const lineHeight = 11;
-    const boxWidth = 600;
+    const boxWidth = 620;
     const baseHeight = 60;
     const mapHeight = this.mapInfo ? 15 : 0;
+    const worldHeight = this.worldInfo ? 25 : 0;
+    const explorationHeight = this.explorationInfo ? 20 : 0;
     const timeHeight = this.timeInfo ? 35 : 0;
     const playerHeight = this.playerInfo ? 15 : 0;
     const cameraHeight = this.cameraInfo ? 15 : 0;
@@ -283,7 +314,7 @@ export class DebugManager {
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -303,6 +334,20 @@ export class DebugManager {
 
     ctx.fillText(`FPS:${this.fps} Time:${this.formatGameTime()} ${this.screenWidth}x${this.screenHeight} Frames:${this.totalFrames}`, x, y);
     y += lineHeight;
+
+    if (this.worldInfo) {
+      ctx.fillStyle = '#8ff';
+      ctx.fillText(`WORLD: ${this.worldInfo.mapCount} maps Current:${this.worldInfo.currentMapId}(${this.worldInfo.currentMapName}) PlayerMap:${this.worldInfo.playerMapId} | ${this.worldInfo.allMaps.map(m=>m.id).join(',')}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.explorationInfo) {
+      ctx.fillStyle = '#fa8';
+      ctx.fillText(`EXPLORATION: ${this.explorationInfo.currentMapName} ${this.explorationInfo.discovered}/${this.explorationInfo.total} (${this.explorationInfo.percentage.toFixed(1)}%) Total ${this.explorationInfo.totalDiscovered}/${this.explorationInfo.totalTiles} (${this.explorationInfo.totalPercentage.toFixed(1)}%) Vision:${this.explorationInfo.visionRadius} Trans:${this.explorationInfo.transitions} Fog:${this.explorationInfo.showFog?'ON':'OFF'}(F) Mini:${this.explorationInfo.showMinimap?'ON':'OFF'}(TAB)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
 
     if (this.timeInfo) {
       ctx.fillStyle = '#8ff';
@@ -340,7 +385,7 @@ export class DebugManager {
 
     if (this.scheduleInfo) {
       ctx.fillStyle = '#8f8';
-      ctx.fillText(`SCHEDULES: ${this.scheduleInfo.count} NPCs | Time ${Math.floor(this.scheduleInfo.currentTimeMinutes/60)}:${String(this.scheduleInfo.currentTimeMinutes%60).padStart(2,'0')} | Show:${this.scheduleInfo.showSchedules?'ON':'OFF'}(K)`, x, y);
+      ctx.fillText(`SCHEDULES: ${this.scheduleInfo.count} NPCs | Time ${Math.floor(this.scheduleInfo.currentTimeMinutes/60)}:${String(this.scheduleInfo.currentTimeMinutes%60).padStart(2,'0')} | Show:${this.scheduleInfo.showSchedules?'ON':'OFF'}(Q)`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
@@ -465,7 +510,7 @@ export class DebugManager {
     ctx.fillText('ROAMERZ', canvasWidth / 2, canvasHeight / 2 - 20);
     ctx.font = '11px monospace';
     ctx.fillStyle = 'rgba(180,255,180,0.8)';
-    ctx.fillText(`Phase 11 - Player Interaction & Dialogue`, canvasWidth / 2, canvasHeight / 2);
+    ctx.fillText(`Phase 12 - Exploration & World Expansion`, canvasWidth / 2, canvasHeight / 2);
     ctx.restore();
   }
 }

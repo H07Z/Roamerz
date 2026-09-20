@@ -15,55 +15,51 @@ PHASE 7  — NPC Pathfinding [COMPLETE]
 PHASE 8  — NPC Homes & Buildings [COMPLETE]
 PHASE 9  — Time & NPC Schedules [COMPLETE]
 PHASE 10 — NPC Life Simulation [COMPLETE]
-PHASE 11 — Player Interaction & Dialogue [CURRENT - COMPLETE]
-PHASE 12 — Exploration & World Expansion
+PHASE 11 — Player Interaction & Dialogue [COMPLETE]
+PHASE 12 — Exploration & World Expansion [CURRENT - COMPLETE]
 ```
 
-## Phase 11 - Player Interaction & Dialogue [CURRENT]
+## Phase 12 - Exploration & World Expansion [CURRENT]
 
 ### Objective
-Player can press E near NPC (60px, prioritize NPCs over buildings) to start dialogue; dialogue UI bottom box with NPC name, text, 1-4 choices; role-based dialogue trees data-driven with placeholders {playerName},{npcName},{time},{day},{phase},{wellbeing},{needs},{inventory},{job}; choices have conditions and actions; dialogue affects NPC needs (social++) and inventory gifts; building interaction prompt near door; while dialogue open player movement blocked, time pauses for conversation; interaction range debug, dialogue state debug.
+Player can explore world, discover tiles, fog of war, minimap, and world expansion with multiple maps (village + forest + lake) and transitions via map edges. Exploration persists per map, vision radius reveals tiles, fog darkens unexplored and dims explored-but-not-visible.
 
-### Interaction System
-- **InteractionSystem**: range 60px (+20 buildings), nearbyInteractables sorted by distance, prioritize NPC if within 40px or closer than building, currentInteractable closest, totalInteractions, prompt "Press E to talk to {name} ({role})" or "Press E to enter {building}..." 
-- **InteractableType**: NPC, BUILDING, NONE; Interactable {type,id,name,distance,npc?,building?,prompt}
-- **Prompt UI**: bottom center 400x30px black bg, green border NPC blue building, icon 💬 NPC 🏠 building, text prompt centered
-- **Game integration**: update player+NPCs+buildings, E/Enter to interact when prompt, recordInteraction, debug InteractionDebugInfo, O toggle prompt, teleports/path tests blocked when dialogue open
-- **Player fix**: removed 'e' key from moveX right, added isDialogueOpen param to update early return IDLE blocks movement during dialogue
+### Exploration System
+- **ExplorationSystem**: per map ExplorationData {explored boolean[] flat, visible boolean[] per frame, width, height, discoveredCount, totalTiles}, visionRadius 8, explorationMap Map<mapId, data>, totalDiscovered, totalTiles, mapTransitions. initialize(maps) creates false arrays. update(playerTile, mapId) clears visible, iterates dx,dy within radius circle distSq<=radius^2, sets visible true, if not explored sets explored true increments discoveredCount and totalDiscovered. Methods isExplored, isVisible, getExploredData, getExploredCount, getTotalExploredCount, getTotalTiles, getTotalTilesForMap, getExplorationPercentage, getTotalExplorationPercentage, getAllMapsExploration, revealAll, revealAllMaps, reset, recordMapTransition, getMapTransitions, getDebugString, getMapDebugString.
+- **ExplorationRenderer**: showFog true, showExploredDim true, renderFog(ctx, worldRenderer, camera, explorationSystem, mapId, screenW, screenH) calculates visible tile range from camera offset/zoom, for each tile in view if !explored fill rgba(0,0,0,0.95) dark, else if !visible and showExploredDim fill rgba(0,0,0,0.5) dim, else no fog. renderVisionDebug draws circle radius*tileSize*zoom dashed blue.
+- **MinimapRenderer**: showMinimap true, minimapSize 150, scale 3, render(ctx, map, explorationSystem, player, npcs, buildings, screenW, screenH) top-right box 150x150 bg rgba(0,0,0,0.8) title map.name + exploration%, scale = min((box-10)/mapWidth, (box-20)/mapHeight, 3), offset x+5 y+15, render explored tiles color per TerrainType (grass #2d5a2d visible #1a3a1a dim, road #8B7355, water #2a5a8a, bridge #6b4c2a, tree #1a4a1a, rock #5a5a5a, house #8a5a3a, farmland #5a6b2a), buildings gray squares, NPCs colored dots per role (farmer #8f8, shopkeeper #ff8, blacksmith #f88, villager #8ff, child #f8f), player white dot + vision circle blue, border, instructions TAB minimap. renderFullMap centered 400x400 overlay bg 0.9 title exploration%, scale to fit, render explored tiles black if unexplored else terrain color, instructions M to close.
 
-### Dialogue System
-- **DialogueChoice**: id, text, nextNodeId null=end, condition {need,item,time{start,end},wellbeing}, action {giveItem,takeItem,restoreNeed{type,amount},setFlag,coins}, icon
-- **DialogueNode**: id, speaker NPC|PLAYER, speakerName?, text, choices[], isEnd?, action {restoreNeed,giveItem,coins}
-- **Dialogue**: id,npcId,npcName,role,startNodeId,nodes Map,flags?
-- **DialogueBuilder**: createNode, createChoice, replacePlaceholders(text,context {playerName,npcName,role,time,day,phase,wellbeing,needs,inventory,job}) replaces {playerName},{npcName},{role},{time},{day},{phase},{wellbeing},{needs},{inventory},{job}
-- **DialogueData.createDialogueForNPC**: role-based trees:
-  - Farmer 🌾: start "Ah hello... {npcName}... {time} Day {day} {phase}... wellbeing {wellbeing}% feeling {needs}" Choices crops/grow/help/goodbye → crops (harvested {inventory}, work 6AM-5PM job progress), grow (produce CROP/FOOD inventory {inventory} trade tools), help (needs {needs} need WOOD), hard_work (job {role} purpose energy/happiness linked), sell (3 coins/h earned {inventory} shop HOUSE002), trade_tools (give CROP social++), needs (needs {needs} wellbeing {wellbeing}% explanation), bring_wood (produce every 10s progress), how_farm (farm at 15,31 pathfinding around buildings uses bridge)
-  - Shopkeeper 🏪: "Welcome... {inventory}... wellbeing {wellbeing}% - {needs}" Choices sell/business/trade/goodbye → sell (FOOD/BREAD/POTION buy from farmer shop HOUSE002 8AM-6PM 8 coins/h inventory {inventory}), business (social high at square produce coins progress), trade (inventory {inventory} needs {needs}), need_food (FOOD eating restores hunger 25/s plus inventory), potions (restore health health decays if 2+ critical restores if energy/hunger >70), buy_food (FOOD if had coins social++ home HOUSE002 door 34,13), buy_bread (BREAD better than FOOD produce coins at shop building work location home building)
-  - Blacksmith 🔨: "*clang* Ah visitor! {npcName}... {time}... wellbeing {wellbeing}% - {needs}... inventory {inventory}" Choices make/tool/forge/goodbye → make (TOOL from STONE/WOOD WORK at HOUSE003 7AM-6PM 6 coins/h costs 10 energy/h most tiring produce TOOL/COIN every 10s), tool (TOOL for 20 coins inventory {inventory} progress), forge (home HOUSE003 door 18,25 north sleep restores energy 15/s schedule SLEEP 0-5:30 etc), tiring (energy decays fastest happiness decays when low energy home visits count), bring_coins (need STONE/WOOD produce every 10s real regardless timeScale 60x 10s real=10min game pathfinding to front-of-door not inside BLOCKED)
-  - Villager 👨: "Hello! {npcName}... {time} Day {day} {phase}... wellbeing {wellbeing}% - {needs}... {inventory}... help at farm and socialize at square!" Choices do/village/chat/goodbye → do (help farm 10-12 wander social 1-3PM square job VILLAGER WOOD/COIN 2 coins/h any location schedule WANDER/SOCIAL to keep social high), village (50x40 2000 tiles 1493 walkable 507 blocked 6 buildings 5 houses+1 shed square 25,20 river bridge 36-41,19), chat (social restores 10/s SOCIALIZING when 2 NPCs near <50px and socializing or at square interact gain social+happiness interactions count), nice (happiness affected by other needs restores at home/eating/socializing home HOUSE004 door 30,26 north), keep_talking (social higher gift FLOWERs sometimes inventory {inventory} FLOWERs for social gifts interactions increase)
-  - Child 🧒: "Hi! {npcName} {role}! {time}! wellbeing {wellbeing}% - {needs}... {inventory} - lots of flowers! Want to play?" Choices play/where/flower/bye → play (PLAY restores happiness 1.5x job CHILD FLOWER 0 coins/h 3 happiness/h happiest job work(play) 8AM-5PM), where (square 25,20 wander 17-18:30 home HOUSE005 door 10,19 east 5x4 sleep 0-7 and 19:30-24 eat lunch at home 12-13), flower (FLOWER 🌸 for social gifts when NPCs interact gift flowers inventory {inventory} value 4 coins), fun (energy decays 7/h playing very active happiness increases needs {needs} wellbeing {wellbeing}%)
-  - Generic: fallback about self role job {job} needs {needs} inventory {inventory} live in {home} schedule and needs decay
-- **DialogueManager**: activeDialogue, currentNodeId, history[], totalDialogues/Choices, isOpen, currentNPC, context {playerName,time,day,phase,timeManager,lifeManager,buildingManager}, activeBuildingDialogue {buildingId,buildingName,text}|null, startDialogue(npc,context) gets lifeData needs/inventory/job/home builds context time/day/phase/wellbeing/needs debug inventory debug job debug home, creates dialogue via DialogueData.createDialogueForNPC, replacePlaceholders all nodes, sets speakerName, activeDialogue, currentNodeId=start, isOpen true, totalDialogues++, restores social 5 happiness 3 incrementSocialInteractions, startBuildingDialogue(buildingId,name,type,owner,occupied,occupant,context) text "Building: {name} ({type}) ID:{id} Owned by... Occupied... Time... This is a {type}... Doors are ROAD INTERACTABLE, house BLOCKED, path to front-of-door" sets activeBuildingDialogue isOpen true totalDialogues++, getCurrentNode if building returns building node 1 choice Close else activeDialogue.nodes.get(currentNodeId), makeChoice(choiceId) finds choice pushes history totalChoices++ logs handles actions restoreNeed/giveItem plus restoreSocial 2 if nextNodeId null endDialogue ended true else moves currentNodeId next handles node actions returns {ended,nextNode}, endDialogue clears, isOpen, getActiveDialogue, getCurrentNPC, getActiveBuildingDialogue, isBuildingDialogue, getTotalDialogues/Choices, getHistory, getDebugString
-- **DialogueRenderer**: showInteractionPrompt true, renderInteractionPrompt(ctx,interactionSystem,screenW,screenH) if no interactable return box 400x30 bottom center screenH-80 bg rgba(0,0,0,0.8) border green NPC blue building prompt centered bold 12px icon 💬/🏠, renderDialogue(ctx,dialogueManager,screenW,screenH) if not open return currentNode dim full screen 0.5 box 600x400 center bottom screenH-420 bg rgba(20,20,30,0.95) border blue NPC green PLAYER speaker name bold 14px 🗣️ NPC 👤 You color #8cf/#8f8 dialogue text wrapped wrapText split words handle \n measureText maxWidth 12px white lines max 8 choicesStartY textY+lines*16+20 choiceHeight 30 spacing 5 choice bg rgba(50,50,70,0.8) border rgba(100,100,150,0.5) number #ff8 "1." icon white text #ddd truncated 50 chars instructions "Press 1-4 to choose, ESC to close" 9px #aaa centered bottom, wrapText splits words handles \n measures returns lines
+### World Expansion
+- **World.ts Phase 12**: initialize loads village_01, forest_01, lake_01, creates WorldMap per data, stores in maps, currentMap=village, overrides village entrances to point to forest_01 and lake_01 at same road positions (24,0 north -> forest, 24,39 south -> lake, 0,19 west -> forest, 49,19 east -> lake). Methods getAllMaps, getAllMapsInfo, loadMap.
+- **village_01.ts**: 50x40 Greenhollow Village, 5 houses, river 38,39 water, bridge 36,41 19,20, square 20,16 12x8 road, farm 8,31 12x5 farmland, forest dense north, trees/rocks scattered, entrances overridden to forest/lake.
+- **forest_01.ts**: New 50x40 Whispering Woods, dense 60% trees, central clearing 20,16 12x8 grass with pond 23,18 6x4 water + bridge island, 3 ruins RUIN001 10,8 5x4, RUIN002 35,10 6x5, RUIN003 15,28 5x4, roads N-S 24,25 and E-W 19,20 cross, paths to ruins, rocks, boundaries trees, openings, entrances north->lake, south->village, west->village, east->lake.
+- **lake_01.ts**: New 50x40 Crystal Lake, large lake 15,12 20x12 water with island 22,16 6x4 grass + tree + rock, bridge/dock to island N and S, sandy shore farmland around lake adjacent to water 70% chance, fishing hut 22,26 6x4 house + road, small farm 30,28 8x4 farmland + shed 32,29 2x2 house, trees/rocks scattered, roads cross, boundaries rock north tree south, openings, entrances north->village, south->forest, west->village, east->forest.
 
-### Integration Phase 11
-- **Game**: fields interactionSystem, dialogueManager, dialogueRenderer, showInteractionPrompt true, initialize sets interaction range 60 logs ready, update timeManager.update only if !dialogue open (pauses time during dialogue), npcManager.update and lifeManager.update only if !dialogue open (pauses NPCs for conversation), interactionSystem.update always, handleDialogueInput ESC closes dialogue, 1-4 chooses when dialogue open, E/Enter starts dialogue when interactable (NPC → startDialogue with context playerName,time,day,phase,timeManager,lifeManager,buildingManager records interaction; BUILDING → startBuildingDialogue), teleports 1-4 and pathfinding tests 5-9 only when dialogue closed, render order world->NPCs->player->time overlay->clock->timeline->interaction prompt->dialogue->debug->help, debug setInteractionInfo/setDialogueInfo, help Phase 11 header shows interaction current type/name/distance and dialogue OPEN/CLOSED controls E/Enter 1-4 ESC O F12 Q etc
-- **Player**: update now takes isDialogueOpen bool if true IDLE return no movement, fixed E key bug
-- **DebugManager**: Phase 11 currentPhase='11', InteractionDebugInfo {hasInteractable,currentType,currentId,currentName,nearbyCount,totalInteractions,range,prompt} and DialogueDebugInfo {isOpen,isBuildingDialogue,activeNpcId/Name,currentNodeId,totalDialogues,totalChoices,historyCount,debug}, fields interactionInfo, dialogueInfo, setters, boxWidth 600, INTERACTION line yellow when hasInteractable with type/name/id nearby total range prompt, DIALOGUE line magenta when open with OPEN/CLOSED NPC/building node total choices history and instructions 1-4 ESC
-- **Preserved Phase 10**: life counts 5 needs valid inventory valid jobs valid decay eating restores job production wellbeing critical inventory add/remove → PASS, Phase 9 time schedules full coverage activities paths day phases timeScale pause schedule changes → PASS, Phase 8 buildings doors walkable homes valid paths validation etc → PASS, Phase 7 pathfinding nearby around building across bridge blocked no path → PASS
+### Game Integration Phase 12
+- **Fields:** explorationSystem, explorationRenderer, minimapRenderer, showFog true, showMinimap true, showFullMap false, showVisionDebug false, playerMapId village_01, mapTransitionCooldown 0.
+- **Initialize:** world.initialize loads 3 maps, explorationSystem.initialize with all maps info, collision/navigation/pathfinder/building for current map (village), NPCs, life, interaction, dialogue, exploration initial update from player tile, set fog/minimap visibility, log Phase 12.
+- **switchMap(targetMapId, entryEdge north/south/west/east):** If same map return false, get targetMap, world.loadMap, reinitialize collision, navigation, pathfinder grid, buildingManager, camera world map, position player at opposite edge (north->south edge y=height-2 x=24, south->north y=1 x=24, west->east x=width-2 y=19, east->west x=1 y=19), search nearby walkable if blocked radius 5, set player position, playerMapId=target, recordMapTransition, cooldown 1s, update exploration for new map, center camera, log.
+- **handleMapTransitions():** If no player or cooldown>0 or dialogue open return, get current map and tilePos, if at edge y<=0 x=24/25 target based on current: village->forest, forest->lake, lake->village north; y>=height-1 x=24/25 south: village->lake, lake->forest, forest->village; x<=0 y=19/20 west: village->forest, forest->lake, lake->village; x>=width-1 y=19/20 east: village->lake, lake->forest, forest->village; if target and edge call switchMap.
+- **Update:** renderer, world, worldRenderer, mapTransitionCooldown--, timeManager update if !dialogue open, player update with isDialogueOpen, camera follow, explorationSystem.update(tilePos, mapId), handleMapTransitions, debug player, collision, NPCs only if isVillage (mapId village_01) and !dialogue open, life only if isVillage and !dialogue open, interaction always, handleDialogueInput with wasDialogueOpenBeforeInput stored, debug NPC, pathfinding, building, time, schedule, life, interaction, dialogue, exploration (currentMap discovered/total percentage totalDiscovered/totalTiles totalPercentage visionRadius transitions showFog showMinimap debug), world (currentMapId/name mapCount allMaps playerMapId), debug update, mapInfo, worldOffset, cameraInfo, handleDebugToggles with wasDialogueOpen.
+- **Render:** clear, worldRenderer render map, collision debug, navigation grid debug if show, buildingRenderer, fog via explorationRenderer.renderFog if showFog, NPCs only if isVillage, playerRenderer + vision debug if showVisionDebug, time overlay, clock, timeline, minimap if showMinimap, full map if showFullMap, interaction prompt if !dialogue open, dialogue if open, debug, help, map transition hint if at edge and cooldown<=0 (box centered top 50px "🌍 Press forward to travel to next map").
+- **Controls:** TAB toggle minimap, F toggle fog (Shift+F overlay), Shift+M full map, Shift+R reveal all current map, Ctrl+R reset exploration, Shift+[ / Shift+] vision radius -/+, F1/F2/F3 jump to village/forest/lake (test), WASD move, E interact, 1-4 teleport safe (when dialogue closed), edges to travel, etc.
+- **Tests:** Phase 12 tests - Test1 world maps 3, Test2 current map, Test3 vision radius 8, Test4 exploration current map discovered>0, Test5 total exploration, Test6 transitions, Test7 reveal all current map -> totalTiles, Test8 reset and re-explore -> >0, Test9 all maps exploration 3 entries, Test10 fog/minimap toggles.
 
-### Tests (Phase 11)
-- Test1 interaction range 60px → PASS
-- Test2 nearby interactables count (depends on pos) → PASS (system works)
-- Test3 dialogue initial closed → PASS
-- Test4 start dialogue with NPC001 → PASS, current node id, speaker, text, choices
-- Test5 make choice → PASS, ended/nextNode
-- Test6 building dialogue → PASS
-- Test7 total interactions >=0 → PASS
-- Test8 total dialogues >0 after tests → PASS
-- Test9 history entries >0 → PASS
-- Test10 player blocked during dialogue → PASS
-- Preserved Phase 10/9/8/7 → PASS (see above)
+### DebugManager Phase 12
+- Phase label 12, boxWidth 620, added ExplorationDebugInfo {currentMapId, currentMapName, discovered, total, percentage, totalDiscovered, totalTiles, totalPercentage, visionRadius, transitions, showFog, showMinimap, debug} and WorldDebugInfo {currentMapId, currentMapName, mapCount, allMaps, playerMapId}, fields explorationInfo, worldInfo, setters, boxHeight includes worldHeight and explorationHeight, render WORLD line with mapCount currentMapId name playerMapId allMaps ids, EXPLORATION line with currentMapName discovered/total percentage totalDiscovered/totalTiles totalPercentage visionRadius transitions fog/minimap toggles.
+
+### Tests (Phase 12)
+- Test1 world maps 3 → PASS
+- Test2 current map exists → PASS
+- Test3 vision radius 8 → PASS
+- Test4 exploration current map discovered>0 → PASS
+- Test5 total exploration discovered>0 → PASS
+- Test6 map transitions >=0 → PASS
+- Test7 reveal all current map -> totalTiles → PASS
+- Test8 reset and re-explore -> >0 → PASS
+- Test9 all maps exploration 3 entries → PASS
+- Test10 fog/minimap toggles → PASS
+- Preserved Phase 11/10/9/8/7 → PASS
 
 ### Running
 
@@ -73,54 +69,65 @@ npm run dev
 # http://localhost:5173
 ```
 
-### Controls (Phase 11)
-- **E / Enter** - Interact with closest NPC/building when prompt shows (💬 Press E to talk to {name} ({role}))
-- **1-4** - Choose dialogue option (when dialogue open)
+### Controls (Phase 12)
+- **WASD/Arrows** - Move player (blocked during dialogue), walk to edge road (N/S/E/W at 24,0 / 24,39 / 0,19 / 49,19) to travel between maps
+- **TAB** - Toggle minimap (top-right, shows explored tiles, player white, NPCs colored, buildings gray, vision circle)
+- **F** - Toggle fog of war (dark unexplored 0.95, dim explored 0.5), **Shift+F** - Toggle day/night overlay
+- **Shift+M** - Toggle full map (400x400 overlay)
+- **Shift+R** - Reveal all current map, **Ctrl+R** - Reset exploration
+- **Shift+[ / Shift+]** - Vision radius -1/+1 (1-20)
+- **F1/F2/F3** - Jump to village/forest/lake (test)
+- **E / Enter** - Interact NPC/building when prompt (💬)
+- **1-4** - Choose dialogue option (when open), else teleport safe positions (when closed, blocked if was open before)
 - **ESC** - Close dialogue
-- **O** - Toggle interaction prompt
-- **F12** - Test dialogue with NPC001
+- **O** - Toggle interaction prompt, **F12** - Test dialogue NPC001
 - **Q** - Toggle schedule debug (when dialogue closed)
-- **Shift+E** - Toggle clock, **F** - Toggle day/night overlay
+- **Shift+E** - Toggle clock
 - **; , .** - Toggle needs/inventory/jobs
-- **WASD/Arrows** - Move player (blocked during dialogue)
-- **C** - Center on player, **V** - Village
+- **C** - Center on player, **V** - Village (center tile 25,20)
 - **Z** - Zoom 1/1.5/0.75, **X** - Smoothing 5/0/10
 - **K** - Collision overlay
-- **N** - Toggle NPC paths, **M** - Toggle nav grid
+- **N** - Toggle NPC paths, **M** - Toggle nav grid (Shift+M full map)
 - **J/L/U/I** - Building doors/labels/ownership/fronts
 - **Space** - Pause/resume time (blocked when dialogue open), **= / +** - Faster x2 max 500x, **- / _** - Slower /2 min 1x, **]** - Advance 1 hour, **[** - Back 1 hour, **\** - Next phase
-- **Y** - All go home, **F5-F8** - NPC1-4 go home, **F9** - Toggle schedules, **F10** - Boost all needs 100%, **F11** - Drain needs critical
-- **T** - Run all Phase7+8+9+10+11 tests, **P** - Print time+NPC+building+schedule+life+interaction+dialogue, **O** - Toggle obstacle
-- **5/6/7/8/9** - Pathfinding tests (blocked when dialogue open), **1/2/3/4** - Teleport (blocked when dialogue open)
+- **Y** - All go home, **F5-F8** - NPC1-4 go home, **F9** - Toggle schedules, **F10** - Boost needs 100%, **F11** - Drain critical
+- **T** - Run all Phase7+8+9+10+11+12 tests, **P** - Print time+NPC+building+schedule+life+interaction+dialogue+exploration+world, **O** - Toggle obstacle
+- **5/6/7/8/9** - Pathfinding tests (blocked when dialogue open)
 - **G** - Grid, **B** - Tile coords, **` / F2 / D** - Debug, **H** - Help, **R** - Reset
 
 ### Architecture
 
 ```
 src/
-├── interaction/
-│   ├── InteractionSystem.ts - range 60px, nearby sorted, prioritize NPC, currentInteractable, prompt, totalInteractions
+├── exploration/
+│   ├── ExplorationSystem.ts - per map explored/visible boolean arrays, vision radius 8 circle, update reveals, percentages, transitions
+│   ├── ExplorationRenderer.ts - fog dark unexplored 0.95, dim explored 0.5, vision debug circle
+│   ├── MinimapRenderer.ts - top-right 150x150 minimap with terrain colors, buildings, NPCs, player, vision circle, full map 400x400 overlay
 │   └── README.md
-├── dialogue/
-│   ├── Dialogue.ts - DialogueChoice/Node/Dialogue, Builder replacePlaceholders
-│   ├── DialogueData.ts - role-based trees farmer/shopkeeper/blacksmith/villager/child/generic with placeholders
-│   ├── DialogueManager.ts - activeDialogue/currentNodeId/history, startDialogue dynamic context, building dialogue, makeChoice actions
-│   ├── DialogueRenderer.ts - interaction prompt 400x30 bottom, dialogue box 600x400 dim + speaker + wrapped text + choices 1-4 + ESC
-│   └── README.md
-├── life/ - preserved Phase 10 (NeedType, NPCNeeds, NPCInventory, JobType, Job, LifeManager, LifeRenderer)
+├── world/
+│   ├── World.ts - Phase 12 loads 3 maps village+forest+lake, getAllMaps, getAllMapsInfo, loadMap, entrances overridden
+│   ├── maps/
+│   │   ├── village_01.ts - 50x40 Greenhollow, 5 houses, river, bridge, square, farm
+│   │   ├── forest_01.ts - 50x40 Whispering Woods, 60% trees, clearing pond, 3 ruins
+│   │   └── lake_01.ts - 50x40 Crystal Lake, large lake 20x12, island, fishing hut, sandy shore
+│   ├── WorldMap.ts - map data, tileCounts, ascii
+│   └── WorldRenderer.ts - tile rendering with zoom
+├── interaction/ - preserved Phase 11 (range 60px, prompt)
+├── dialogue/ - preserved Phase 11 (role-based trees, placeholders, actions)
+├── life/ - preserved Phase 10 (needs, inventory, jobs)
 ├── time/ - preserved Phase 9 (TimeManager, TimeRenderer)
-├── schedule/ - preserved Phase 9 (ScheduleManager 5 schedules)
-├── building/ - preserved Phase 8 (6 buildings, doors, ownership, occupancy)
-├── core/Game.ts - + InteractionSystem/DialogueManager/Renderer, time/npc/life paused when dialogue open, E/Enter/ESC/1-4 handling, render prompt+dialogue top layer, debug interaction/dialogue, T runs Phase7+8+9+10+11
-├── core/DebugManager.ts - + InteractionDebugInfo/DialogueDebugInfo, INTERACTION and DIALOGUE lines, Phase 11 boxWidth 600
-├── player/Player.ts - + isDialogueOpen param blocks movement, fixed E key bug
-├── npc/ - preserved with needs/inventory/job
+├── schedule/ - preserved Phase 9 (ScheduleManager)
+├── building/ - preserved Phase 8 (6 buildings village, 3 ruins forest, 1 hut lake)
+├── core/Game.ts - + ExplorationSystem/Renderer/MinimapRenderer, switchMap, handleMapTransitions, fog/minimap/full map rendering, TAB/F/Shift+M/Shift+R/Ctrl+R/F1-3 controls, T runs Phase7-12
+├── core/DebugManager.ts - + ExplorationDebugInfo/WorldDebugInfo, WORLD and EXPLORATION lines, Phase 12 boxWidth 620
+├── player/Player.ts - preserved with isDialogueOpen block, fixed E bug
+├── npc/ - preserved village only
 ├── pathfinding/ - preserved A*
-├── world/ - 50x40 village
 └── main.ts
 ```
 
 ### Previous Phases
+- Phase 11: Interaction & Dialogue - E to talk 60px prioritize NPC, dialogue UI bottom box 600x400 speaker color wrapped text choices 1-4 ESC, role-based trees with placeholders, actions giveItem/restoreNeed, social++ happiness, building prompt, movement blocked during dialogue, time paused, teleport bug fixed (wasDialogueOpenBeforeInput)
 - Phase 10: NPC Life Simulation - Needs 5 types decay/restore, Inventory 10 items role-based, Jobs 6 types produce every 10s, LifeManager eating/interactions, LifeRenderer bars
 - Phase 9: Time & Schedules - TimeManager day phases, timeScale 60x, ScheduleManager 5 role schedules full coverage, NPC schedule changes
 - Phase 8: 6 buildings, doors walkable, homes valid, paths to home, occupancy
