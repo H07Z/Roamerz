@@ -27,9 +27,14 @@ export function migrateSaveFile(saveFile: any): SaveFile {
         migratedFile = migrateToV13(migratedFile);
         migrations.push(`Migrated to v13 (Phase 13 Save System)`);
         break;
-      // Future versions:
-      // case 14: migratedFile = migrateToV14(migratedFile); break;
-      // case 15: migratedFile = migrateToV15(migratedFile); break;
+      case 14:
+        migratedFile = migrateToV14(migratedFile);
+        migrations.push(`Migrated to v14 (Phase 14 Inventory System)`);
+        break;
+      case 15:
+        migratedFile = migrateToV15(migratedFile);
+        migrations.push(`Migrated to v15 (Phase 15 Farming System)`);
+        break;
       default:
         // Generic migration: ensure defaults for unknown future version
         migratedFile = migrateGeneric(migratedFile, nextVersion);
@@ -186,9 +191,91 @@ function migrateGeneric(saveFile: any, targetVersion: number): any {
   };
 }
 
-// For future phases, add specific migrations:
-// function migrateToV14(saveFile: any): any { ... }
-// function migrateToV15(saveFile: any): any { ... }
+function migrateToV14(oldSave: any): any {
+  // V14 adds Inventory slots array, totalValue, preserves legacy items
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+
+  const oldInv = oldSave.player?.inventory ?? {};
+
+  // If old inventory had items array (legacy), preserve it and also create slots if missing
+  const newInventory = {
+    ...defaults.player.inventory,
+    ...oldInv,
+    items: oldInv.items ?? [],
+    slots: oldInv.slots ?? undefined, // if no slots, let load handle legacy
+    capacity: oldInv.capacity ?? 20,
+    coins: oldInv.coins ?? oldSave.player?.money ?? 50,
+    version: 2, // bump inventory version for slots support
+    totalValue: oldInv.totalValue ?? 0
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 14,
+    gameVersion: oldSave.gameVersion ?? '0.14.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      inventory: newInventory,
+      money: oldSave.player?.money ?? newInventory.coins ?? 50
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} },
+      flags: oldSave.world?.flags ?? {},
+      openedLocations: oldSave.world?.openedLocations ?? ['village_01'],
+      collectedObjects: oldSave.world?.collectedObjects ?? [],
+      changedObjects: oldSave.world?.changedObjects ?? {},
+      farming: oldSave.world?.farming ?? { plots: {}, version: 1 },
+      animals: oldSave.world?.animals ?? { animals: {}, version: 1 },
+      weather: oldSave.world?.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
+      economy: oldSave.world?.economy ?? { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 }
+    },
+    npcs: oldSave.npcs ?? {},
+    quests: { ...defaults.quests, ...(oldSave.quests ?? {}), quests: oldSave.quests?.quests ?? {} },
+    future: oldSave.future ?? {},
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 14, gameVersion: oldSave.gameVersion ?? '0.14.0' }
+  };
+}
+
+function migrateToV15(oldSave: any): any {
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+  const oldFarming = oldSave.world?.farming ?? { plots: {}, version: 1 };
+
+  const newFarming = {
+    plots: oldFarming.plots ?? {},
+    totalPlotsCreated: oldFarming.totalPlotsCreated ?? Object.keys(oldFarming.plots ?? {}).length,
+    totalHarvested: oldFarming.totalHarvested ?? 0,
+    totalPlanted: oldFarming.totalPlanted ?? 0,
+    version: 2
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 15,
+    gameVersion: oldSave.gameVersion ?? '0.15.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      farming: oldSave.player?.farming ?? {}
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      farming: newFarming,
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} }
+    },
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 15, gameVersion: oldSave.gameVersion ?? '0.15.0' }
+  };
+}
+
+// For future phases:
+// function migrateToV16(saveFile: any): any { ... }
 
 export function getMigrationPath(fromVersion: number, toVersion: number = SAVE_VERSION): number[] {
   const path: number[] = [];

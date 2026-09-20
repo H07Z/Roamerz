@@ -2,6 +2,7 @@
  * Player - Phase 4
  * Single player with movement, states, direction, world boundary + collision
  * Now uses CollisionSystem to prevent walking through blocked objects
+ * Phase 14: Integrated with Inventory system
  */
 
 import { InputManager } from '../core/InputManager';
@@ -9,6 +10,8 @@ import { WorldMap } from '../world/WorldMap';
 import { WorldRenderer } from '../world/WorldRenderer';
 import { CollisionSystem } from '../collision/CollisionSystem';
 import { CollisionType } from '../collision/CollisionType';
+import { Inventory } from '../inventory/Inventory';
+import { ItemDatabase } from '../inventory/ItemDatabase';
 
 export enum PlayerState {
   IDLE = 'IDLE',
@@ -60,9 +63,12 @@ export class Player {
   public xp: number = 0;
   public playTimeSeconds: number = 0;
 
-  // Inventory placeholder (Phase 14)
+  // Phase 14 Inventory System
+  public inventory: Inventory;
+  public inventoryCapacity: number = 20; // kept for backwards compat, now delegates to inventory.getCapacity()
+
+  // Legacy placeholder for backwards compat with old saves (deprecated, use inventory)
   public inventoryItems: { id: string; quantity: number }[] = [];
-  public inventoryCapacity: number = 20;
 
   // Relationships (Phase 19)
   public relationships: Record<string, number> = {};
@@ -94,6 +100,7 @@ export class Player {
     this.speed = speed;
     this.direction = PlayerDirection.DOWN;
     this.state = PlayerState.IDLE;
+    this.inventory = new Inventory(this.inventoryCapacity, ItemDatabase.getInstance());
   }
 
   /**
@@ -258,8 +265,21 @@ export class Player {
     return { terrain, collision: null };
   }
 
-  // Phase 13 Save/Load
+  // Phase 13 Save/Load + Phase 14 Inventory
   getSaveData(mapId: string): any {
+    const inventorySave = this.inventory.getSaveData();
+    // Keep legacy items for backwards compat
+    const legacyItems = this.inventory.getNonEmptySlots().map(s => ({ id: s.id, quantity: s.quantity }));
+    // SaveTypes-compatible slots: compact array with itemId
+    const saveTypesSlots = this.inventory.getNonEmptySlots().map(s => ({
+      itemId: s.id,
+      id: s.id, // keep both for compat
+      quantity: s.quantity,
+      metadata: s.metadata ?? {}
+    }));
+    this.inventoryItems = legacyItems;
+    this.inventoryCapacity = this.inventory.getCapacity();
+
     return {
       x: this.x,
       y: this.y,
@@ -272,10 +292,12 @@ export class Player {
       maxStamina: this.maxStamina,
       money: this.money,
       inventory: {
-        items: this.inventoryItems,
-        capacity: this.inventoryCapacity,
+        slots: saveTypesSlots, // SaveTypes compact format with itemId
+        items: legacyItems, // legacy
+        capacity: inventorySave.capacity,
         coins: this.money,
-        version: 1,
+        version: inventorySave.version,
+        totalValue: this.inventory.getTotalValue(),
         equipment: {},
         quickSlots: [null, null, null, null]
       },
@@ -324,12 +346,27 @@ export class Player {
       this.level = typeof data.level === 'number' ? data.level : (data.progression?.level ?? 1);
       this.xp = typeof data.xp === 'number' ? data.xp : (data.progression?.xp ?? 0);
 
-      // Inventory
+      // Inventory - Phase 14
       if (data.inventory) {
-        this.inventoryItems = Array.isArray(data.inventory.items) ? data.inventory.items : [];
-        this.inventoryCapacity = typeof data.inventory.capacity === 'number' ? data.inventory.capacity : 20;
+        // New format with slots
+        if (data.inventory.slots) {
+          this.inventory.loadSaveData(data.inventory);
+        } else if (Array.isArray(data.inventory.items)) {
+          // Legacy items array
+          this.inventory.loadSaveData(data.inventory);
+        }
+        this.inventoryCapacity = typeof data.inventory.capacity === 'number' ? data.inventory.capacity : this.inventory.getCapacity();
+        this.inventory.setCapacity(this.inventoryCapacity);
         this.money = typeof data.inventory.coins === 'number' ? data.inventory.coins : this.money;
+
+        // Keep legacy array in sync
+        this.inventoryItems = this.inventory.getNonEmptySlots().map(s => ({ id: s.id, quantity: s.quantity }));
       } else if (Array.isArray(data.inventoryItems)) {
+        // Very old format
+        this.inventory.clearInventory();
+        for (const it of data.inventoryItems) {
+          this.inventory.addItem(it.id, it.quantity);
+        }
         this.inventoryItems = data.inventoryItems;
       }
 
@@ -341,7 +378,6 @@ export class Player {
         if (Array.isArray(data.stats.npcsMet)) {
           this.npcsMet = new Set(data.stats.npcsMet);
         }
-        // mapsDiscovered handled via flags
       }
 
       // Progression
@@ -363,15 +399,11 @@ export class Player {
       this.equipmentData = data.equipment ?? {};
       this.combatData = data.combat ?? {};
 
-      // Rebuild sets
-      if (data.stats?.mapsDiscovered && typeof data.stats.mapsDiscovered === 'number') {
-        // Keep existing set, mapsDiscovered count is informational
-      }
       if (data.mapId) {
         this.mapsDiscovered.add(data.mapId);
       }
 
-      console.log(`[Player] Loaded save data: pos ${this.x.toFixed(0)},${this.y.toFixed(0)} map ${data.mapId} health ${this.health} money ${this.money}`);
+      console.log(`[Player] Loaded save data: pos ${this.x.toFixed(0)},${this.y.toFixed(0)} map ${data.mapId} health ${this.health} money ${this.money} inv ${this.inventory.getUsedSlots()}/${this.inventory.getCapacity()} ${this.inventory.getDebugString()}`);
     } catch (e) {
       console.error('[Player] Failed to load save data:', e);
     }
@@ -381,36 +413,52 @@ export class Player {
     this.playTimeSeconds += deltaTime;
   }
 
-  // For Phase 14 inventory placeholder
+  // Phase 14 Inventory API - delegates to Inventory class (required by spec)
   addItem(itemId: string, quantity: number = 1): boolean {
-    const existing = this.inventoryItems.find(i => i.id === itemId);
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      if (this.inventoryItems.length >= this.inventoryCapacity) return false;
-      this.inventoryItems.push({ id: itemId, quantity });
-    }
-    return true;
-  }
-
-  hasItem(itemId: string, quantity: number = 1): boolean {
-    const item = this.inventoryItems.find(i => i.id === itemId);
-    return item ? item.quantity >= quantity : false;
-  }
-
-  getItemQuantity(itemId: string): number {
-    const item = this.inventoryItems.find(i => i.id === itemId);
-    return item ? item.quantity : 0;
+    const result = this.inventory.addItem(itemId, quantity);
+    // Keep legacy array in sync
+    this.inventoryItems = this.inventory.getNonEmptySlots().map(s => ({ id: s.id, quantity: s.quantity }));
+    return result;
   }
 
   removeItem(itemId: string, quantity: number = 1): boolean {
-    const idx = this.inventoryItems.findIndex(i => i.id === itemId);
-    if (idx === -1) return false;
-    if (this.inventoryItems[idx].quantity < quantity) return false;
-    this.inventoryItems[idx].quantity -= quantity;
-    if (this.inventoryItems[idx].quantity <= 0) {
-      this.inventoryItems.splice(idx, 1);
-    }
-    return true;
+    const result = this.inventory.removeItem(itemId, quantity);
+    this.inventoryItems = this.inventory.getNonEmptySlots().map(s => ({ id: s.id, quantity: s.quantity }));
+    return result;
+  }
+
+  hasItem(itemId: string, quantity: number = 1): boolean {
+    return this.inventory.hasItem(itemId, quantity);
+  }
+
+  getItemQuantity(itemId: string): number {
+    return this.inventory.getItemQuantity(itemId);
+  }
+
+  hasSpace(itemId?: string, quantity: number = 1): boolean {
+    return this.inventory.hasSpace(itemId, quantity);
+  }
+
+  clearInventory(): void {
+    this.inventory.clearInventory();
+    this.inventoryItems = [];
+  }
+
+  // Additional helpers
+  getInventory(): Inventory {
+    return this.inventory;
+  }
+
+  sortInventory(mode?: any): void {
+    this.inventory.sort(mode);
+    this.inventoryItems = this.inventory.getNonEmptySlots().map(s => ({ id: s.id, quantity: s.quantity }));
+  }
+
+  getInventoryDebugString(): string {
+    return this.inventory.getDebugString();
+  }
+
+  getInventoryDetailedString(): string {
+    return this.inventory.getDetailedDebugString();
   }
 }

@@ -4,8 +4,8 @@
  * Supports future: farming, animals, weather, crafting, combat, dungeons, events, relationships, etc.
  */
 
-export const SAVE_VERSION = 13; // Phase 13
-export const SAVE_GAME_VERSION = '0.13.0';
+export const SAVE_VERSION = 15; // Phase 15 - Farming System
+export const SAVE_GAME_VERSION = '0.15.0';
 export const MAX_SAVE_SLOTS = 5;
 export const STORAGE_KEY_PREFIX = 'roamerz_save_';
 export const STORAGE_META_KEY = 'roamerz_save_meta';
@@ -21,10 +21,12 @@ export interface ItemSaveData {
 }
 
 export interface InventorySaveData {
-  items: ItemSaveData[]; // player inventory (future Phase 14)
+  items: ItemSaveData[]; // legacy Phase 13 format (itemId -> id)
+  slots?: { itemId: string; quantity: number; metadata?: Record<string, any> }[]; // Phase14 new format
   capacity: number;
   coins: number; // money placeholder
   version: number;
+  totalValue?: number;
   // future
   equipment?: Record<string, string | null>; // slot -> itemId
   quickSlots?: (string | null)[];
@@ -228,9 +230,12 @@ export interface WorldSaveData {
   questRelatedChanges: Record<string, any>;
   eventStates: Record<string, any>; // eventId -> state
 
-  // Future systems placeholders
+  // Farming System Phase15
   farming?: {
-    plots: Record<string, any>;
+    plots: Record<string, any>; // plotId -> FarmPlotData
+    totalPlotsCreated: number;
+    totalHarvested: number;
+    totalPlanted: number;
     version: number;
   };
   animals?: {
@@ -426,7 +431,7 @@ export function createDefaultWorldSaveData(): WorldSaveData {
     changedObjects: {},
     questRelatedChanges: {},
     eventStates: {},
-    farming: { plots: {}, version: 1 },
+    farming: { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
     animals: { animals: {}, version: 1 },
     weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
     economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },

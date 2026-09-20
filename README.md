@@ -16,50 +16,86 @@ PHASE 8  — NPC Homes & Buildings [COMPLETE]
 PHASE 9  — Time & NPC Schedules [COMPLETE]
 PHASE 10 — NPC Life Simulation [COMPLETE]
 PHASE 11 — Player Interaction & Dialogue [COMPLETE]
-PHASE 12 — Exploration & World Expansion [CURRENT - COMPLETE]
+PHASE 12 — Exploration & World Expansion [COMPLETE]
+PHASE 13 — Save/Load & World Persistence [COMPLETE]
+PHASE 14 — Inventory System [COMPLETE]
+PHASE 15 — Farming System [CURRENT]
 ```
 
-## Phase 12 - Exploration & World Expansion [CURRENT]
+## Phase 15 - Farming System [CURRENT]
 
 ### Objective
-Player can explore world, discover tiles, fog of war, minimap, and world expansion with multiple maps (village + forest + lake) and transitions via map edges. Exploration persists per map, vision radius reveals tiles, fog darkens unexplored and dims explored-but-not-visible.
+Data-driven farming with till soil (convert farmland/grass to tilled plot), plant seeds (wheat_seed, carrot_seed, berry, herb from inventory), growth stages TILLED→PLANTED→SPROUT→GROWING→MATURE→READY→WITHERED, watering boost (waterBoost multiplier x1.5), harvest yields via inventory addItem (harvestItemId + bonus seeds), time-based growth using TimeManager totalSeconds (growthTimeSeconds, witherTimeSeconds), plots per map persisted (x,y,mapId), reusable functions createPlot(), tillPlot(), plantSeed(), waterPlot(), harvestPlot(), getGrowthStage(), getPlotState(). Small changes, preserve Phase14 inventory.
 
-### Exploration System
-- **ExplorationSystem**: per map ExplorationData {explored boolean[] flat, visible boolean[] per frame, width, height, discoveredCount, totalTiles}, visionRadius 8, explorationMap Map<mapId, data>, totalDiscovered, totalTiles, mapTransitions. initialize(maps) creates false arrays. update(playerTile, mapId) clears visible, iterates dx,dy within radius circle distSq<=radius^2, sets visible true, if not explored sets explored true increments discoveredCount and totalDiscovered. Methods isExplored, isVisible, getExploredData, getExploredCount, getTotalExploredCount, getTotalTiles, getTotalTilesForMap, getExplorationPercentage, getTotalExplorationPercentage, getAllMapsExploration, revealAll, revealAllMaps, reset, recordMapTransition, getMapTransitions, getDebugString, getMapDebugString.
-- **ExplorationRenderer**: showFog true, showExploredDim true, renderFog(ctx, worldRenderer, camera, explorationSystem, mapId, screenW, screenH) calculates visible tile range from camera offset/zoom, for each tile in view if !explored fill rgba(0,0,0,0.95) dark, else if !visible and showExploredDim fill rgba(0,0,0,0.5) dim, else no fog. renderVisionDebug draws circle radius*tileSize*zoom dashed blue.
-- **MinimapRenderer**: showMinimap true, minimapSize 150, scale 3, render(ctx, map, explorationSystem, player, npcs, buildings, screenW, screenH) top-right box 150x150 bg rgba(0,0,0,0.8) title map.name + exploration%, scale = min((box-10)/mapWidth, (box-20)/mapHeight, 3), offset x+5 y+15, render explored tiles color per TerrainType (grass #2d5a2d visible #1a3a1a dim, road #8B7355, water #2a5a8a, bridge #6b4c2a, tree #1a4a1a, rock #5a5a5a, house #8a5a3a, farmland #5a6b2a), buildings gray squares, NPCs colored dots per role (farmer #8f8, shopkeeper #ff8, blacksmith #f88, villager #8ff, child #f8f), player white dot + vision circle blue, border, instructions TAB minimap. renderFullMap centered 400x400 overlay bg 0.9 title exploration%, scale to fit, render explored tiles black if unexplored else terrain color, instructions M to close.
+### Farming System
+- **Crop.ts**: GrowthStage enum TILLED/PLANTED/SPROUT/GROWING/MATURE/READY/WITHERED/HARVESTED, PlotState UNTILLED/TILLED/PLANTED/WATERED/GROWING/READY/WITHERED, CropDefinition {id, name, seedItemId, harvestItemId, bonusSeedItemId, growthTimeSeconds, stages[], stageThresholds[], yieldMin/Max, bonusSeedChance/Min/Max, waterBoost, witherTimeSeconds, icon, color, description, requiredTool, tags}, FarmPlotData {id, x,y, mapId, state, growthStage, cropId, plantedAt, wateredAt, isWatered, growthProgress 0-1, readyAt, witherAt, tilledAt, harvestCount, version}, FarmingSaveData {plots Record<id, data>, totalPlotsCreated, totalHarvested, totalPlanted, version}, helpers createEmptyPlot(x,y,mapId,totalSeconds), getGrowthStageFromProgress(progress, def) finds stage via thresholds, getPlotStateFromGrowthStage.
+- **CropDatabase.ts**: singleton, 4 crops data-driven:
+  - wheat: 🌾 2 days growth, yield 2-4 wheat, bonus 50% 1-2 wheat_seed, waterBoost 1.5, wither 1 day, icon 🌾
+  - carrot: 🥕 1.5 days, yield 1-3 carrot, bonus 30% 1 carrot_seed, waterBoost 1.5, wither 1 day
+  - berry_bush: 🫐 1 day, yield 2-5 berry, bonus 40% 1-2 berry, waterBoost 1.3, wither 2 days
+  - herb: 🌿 0.8 days, yield 1-3 herb, bonus 60% 1-2 herb, waterBoost 1.4, wither 1.5 days
+  Methods getCrop(id), getAllCrops, getCropBySeed(seedItemId), getCount, hasCrop, register/unregister, validate checks id/seed/harvest/growthTime/stages thresholds/yield, getDebugString `${size} crops: keys`.
+- **FarmPlot.ts**: single plot logic till(), plant(cropId,totalSeconds), plantBySeed(seedItemId,totalSeconds) via CropDatabase lookup, water(totalSeconds) sets isWatered true wateredAt, update(totalSeconds) calculates elapsed = totalSeconds-plantedAt, effectiveElapsed = elapsed*waterBoost if watered, progress = min(1, effectiveElapsed/growthTime), stage via getGrowthStageFromProgress, when READY sets readyAt/witherAt = totalSeconds + witherTime, if totalSeconds>=witherAt → WITHERED, water dries after 0.5*86400s, harvest(totalSeconds) returns {success,cropId,yield,bonusSeeds,bonusSeedId} random yieldMin-Max and bonus chance, resets to TILLED HARVESTED, clearWithered, getSaveData/fromSaveData, getDebugString, getDetailedString, getData.
+- **FarmingSystem.ts**: manager plots Map<id, FarmPlot>, cropDatabase, totals created/harvested/planted, version. initialize(maps) logs. createPlot(x,y,mapId,totalSeconds,worldMap?) checks bounds and TerrainType.FARMLAND/GRASS/ROAD, creates FarmPlot, increments created. tillPlot(x,y,mapId,totalSeconds,worldMap?) creates if not exists else plot.till. plantSeed uses plantBySeed, increments planted. plantCrop, waterPlot, harvestPlot increments harvested, getPlot/hasPlot/getPlotsForMap/getAllPlots/getPlotCount/getNearbyPlots radius search distSq<=r^2, update(totalSeconds) calls plot.update, getSaveData/loadSaveData with totals version, clear/clearMap, getDebugString `${size} plots (T:G:R:W) created planted harvested`, getMapDebugString, debugPrint, fillWithTestPlots for debug.
+- **FarmingRenderer.ts**: render(ctx,farmingSystem,worldRenderer,camera,mapId,w,h) if showFarming, gets plots for map, culls off-screen, renders tilled soil brown with lines, withered 💀 dark, growing crop bg color per stage (PLANTED brown seed 🌰, SPROUT light green 🌱, GROWING green, MATURE darker, READY gold), icon crop.icon scaled by stage, progress bar black bg green (blue if watered) with %, watered 💧 top-right, ready gold glow pulse stroke + fill, renderPlotInfo selected plot box 300x120 bottom 20,80 showing state stage %, crop name description yield bonus growth water wither, actions [Plant:E][Water:R][Harvest:E][Clear:E], tilled/planted day.
 
-### World Expansion
-- **World.ts Phase 12**: initialize loads village_01, forest_01, lake_01, creates WorldMap per data, stores in maps, currentMap=village, overrides village entrances to point to forest_01 and lake_01 at same road positions (24,0 north -> forest, 24,39 south -> lake, 0,19 west -> forest, 49,19 east -> lake). Methods getAllMaps, getAllMapsInfo, loadMap.
-- **village_01.ts**: 50x40 Greenhollow Village, 5 houses, river 38,39 water, bridge 36,41 19,20, square 20,16 12x8 road, farm 8,31 12x5 farmland, forest dense north, trees/rocks scattered, entrances overridden to forest/lake.
-- **forest_01.ts**: New 50x40 Whispering Woods, dense 60% trees, central clearing 20,16 12x8 grass with pond 23,18 6x4 water + bridge island, 3 ruins RUIN001 10,8 5x4, RUIN002 35,10 6x5, RUIN003 15,28 5x4, roads N-S 24,25 and E-W 19,20 cross, paths to ruins, rocks, boundaries trees, openings, entrances north->lake, south->village, west->village, east->lake.
-- **lake_01.ts**: New 50x40 Crystal Lake, large lake 15,12 20x12 water with island 22,16 6x4 grass + tree + rock, bridge/dock to island N and S, sandy shore farmland around lake adjacent to water 70% chance, fishing hut 22,26 6x4 house + road, small farm 30,28 8x4 farmland + shed 32,29 2x2 house, trees/rocks scattered, roads cross, boundaries rock north tree south, openings, entrances north->village, south->forest, west->village, east->forest.
+### Inventory Extension Phase 15
+- **Item.ts**: ItemType adds WHEAT='wheat', CARROT='carrot' (now 27 types)
+- **ItemDatabase.ts**: 27 items, added wheat (🌾 value8 hunger20 tags harvest food farmable) and carrot (🥕 value10 health5 hunger25 tags harvest food farmable) for farming yield.
 
-### Game Integration Phase 12
-- **Fields:** explorationSystem, explorationRenderer, minimapRenderer, showFog true, showMinimap true, showFullMap false, showVisionDebug false, playerMapId village_01, mapTransitionCooldown 0.
-- **Initialize:** world.initialize loads 3 maps, explorationSystem.initialize with all maps info, collision/navigation/pathfinder/building for current map (village), NPCs, life, interaction, dialogue, exploration initial update from player tile, set fog/minimap visibility, log Phase 12.
-- **switchMap(targetMapId, entryEdge north/south/west/east):** If same map return false, get targetMap, world.loadMap, reinitialize collision, navigation, pathfinder grid, buildingManager, camera world map, position player at opposite edge (north->south edge y=height-2 x=24, south->north y=1 x=24, west->east x=width-2 y=19, east->west x=1 y=19), search nearby walkable if blocked radius 5, set player position, playerMapId=target, recordMapTransition, cooldown 1s, update exploration for new map, center camera, log.
-- **handleMapTransitions():** If no player or cooldown>0 or dialogue open return, get current map and tilePos, if at edge y<=0 x=24/25 target based on current: village->forest, forest->lake, lake->village north; y>=height-1 x=24/25 south: village->lake, lake->forest, forest->village; x<=0 y=19/20 west: village->forest, forest->lake, lake->village; x>=width-1 y=19/20 east: village->lake, lake->forest, forest->village; if target and edge call switchMap.
-- **Update:** renderer, world, worldRenderer, mapTransitionCooldown--, timeManager update if !dialogue open, player update with isDialogueOpen, camera follow, explorationSystem.update(tilePos, mapId), handleMapTransitions, debug player, collision, NPCs only if isVillage (mapId village_01) and !dialogue open, life only if isVillage and !dialogue open, interaction always, handleDialogueInput with wasDialogueOpenBeforeInput stored, debug NPC, pathfinding, building, time, schedule, life, interaction, dialogue, exploration (currentMap discovered/total percentage totalDiscovered/totalTiles totalPercentage visionRadius transitions showFog showMinimap debug), world (currentMapId/name mapCount allMaps playerMapId), debug update, mapInfo, worldOffset, cameraInfo, handleDebugToggles with wasDialogueOpen.
-- **Render:** clear, worldRenderer render map, collision debug, navigation grid debug if show, buildingRenderer, fog via explorationRenderer.renderFog if showFog, NPCs only if isVillage, playerRenderer + vision debug if showVisionDebug, time overlay, clock, timeline, minimap if showMinimap, full map if showFullMap, interaction prompt if !dialogue open, dialogue if open, debug, help, map transition hint if at edge and cooldown<=0 (box centered top 50px "🌍 Press forward to travel to next map").
-- **Controls:** TAB toggle minimap, F toggle fog (Shift+F overlay), Shift+M full map, Shift+R reveal all current map, Ctrl+R reset exploration, Shift+[ / Shift+] vision radius -/+, F1/F2/F3 jump to village/forest/lake (test), WASD move, E interact, 1-4 teleport safe (when dialogue closed), edges to travel, etc.
-- **Tests:** Phase 12 tests - Test1 world maps 3, Test2 current map, Test3 vision radius 8, Test4 exploration current map discovered>0, Test5 total exploration, Test6 transitions, Test7 reveal all current map -> totalTiles, Test8 reset and re-explore -> >0, Test9 all maps exploration 3 entries, Test10 fog/minimap toggles.
+### Save Extension Phase 15
+- **SaveTypes.ts**: SAVE_VERSION 15 SAVE_GAME_VERSION 0.15.0, WorldSaveData.farming now {plots, totalPlotsCreated, totalHarvested, totalPlanted, version:2} default.
+- **SaveMigration.ts**: case 15 migrateToV15: old farming {plots, version1} → new {plots, totalPlotsCreated=plots length, totalHarvested 0, totalPlanted 0, version2}, preserves other worlds, generic fallback.
 
-### DebugManager Phase 12
-- Phase label 12, boxWidth 620, added ExplorationDebugInfo {currentMapId, currentMapName, discovered, total, percentage, totalDiscovered, totalTiles, totalPercentage, visionRadius, transitions, showFog, showMinimap, debug} and WorldDebugInfo {currentMapId, currentMapName, mapCount, allMaps, playerMapId}, fields explorationInfo, worldInfo, setters, boxHeight includes worldHeight and explorationHeight, render WORLD line with mapCount currentMapId name playerMapId allMaps ids, EXPLORATION line with currentMapName discovered/total percentage totalDiscovered/totalTiles totalPercentage visionRadius transitions fog/minimap toggles.
+### Game Integration Phase 15
+- **Fields**: cropDatabase singleton, farmingSystem, farmingRenderer, showFarming true, showFarmingDebug true, farmingInteractionRange 60, selectedFarmPlotId.
+- **Initialize**: world 3 maps, exploration, collision/nav/pathfinder/building, time, schedule, NPCs, life, interaction, dialogue, exploration initial, fog/minimap, save slots, ItemDatabase 27 items validation, Inventory, FarmingSystem initialize with all maps, CropDatabase 4 crops validation, FarmingSystem debug, set showFarming, log Phase15 controls.
+- **CollectSaveData**: farmingSave = farmingSystem.getSaveData() included in worldSave.farming.
+- **ApplySaveData**: if saveFile.world.farming load via farmingSystem.loadSaveData.
+- **NewGame**: farmingSystem initialize + clear, reset showFarming.
+- **handleFarmingInput**: if no player or dialogue/save/inventory open return, get map tilePos totalSeconds, getNearbyPlots radius2 find closest, standingPlot, selectedFarmPlotId = closest if dist<=2 else standing else clear if far>3. E key: if hasInteractable (NPC/building) return to let dialogue handle. Else if closestPlot dist<=2:
+  - TILLED: try seeds ['wheat_seed','carrot_seed','berry','herb'] if player hasItem, get crop via getCropBySeed, plantSeed, removeItem seed, message.
+  - READY: harvestPlot, addItem harvestItemId yield, bonus seeds, message.
+  - WITHERED: clearWithered.
+  - GROWING/PLANTED/WATERED: if not watered waterPlot.
+  Else no plot nearby: try till current tile if terrain FARMLAND(7) or GRASS(0) via tillPlot, else try front tile based on player direction (up/down/left/right) if farmland/grass till.
+  R key water nearby if not watered and not TILLED/READY/WITHERED.
+- **Update**: timeManager update if no UI, farmingSystem.update(totalSeconds, deltaTime), player update with isDialogueOpen|save|inventory, camera, exploration update, map transitions, debug player/collision, NPCs village only, life, interaction, dialogue input, inventory input, farming input, save input, debug NPC/pathfinding/building/time/schedule/life/interaction/dialogue/exploration/world/save/inventory/farming (cropCount, crops, plotCount, mapPlotCount, debug, mapDebug, showFarming), mapInfo, cameraInfo, handleDebugToggles.
+- **Render**: clear, worldRenderer, collision debug, nav grid debug, buildingRenderer, building fronts, farmingRenderer.render (before fog), fog, NPCs village only, playerRenderer, vision debug, time overlay/clock/timeline, minimap, full map, interaction prompt if !dialogue&&!save&&!inventory, dialogue, inventoryRenderer, farming selected plot info if selected and no UI, saveRenderer, debug, help, map edge hint.
+- **Controls**: F toggle farming overlay (was fog, now Shift+F fog), Shift+F fog, E till/plant/water/harvest/clear, R water, Shift+P create 6 test plots, P prints farming nearby + debug, T runs all tests 7-15.
+- **Tests**: runPhase15Tests 12 tests:
+  1 CropDatabase count 4
+  2 validation
+  3 createPlot
+  4 tillPlot
+  5 plantSeed
+  6 waterPlot watered true
+  7 growth 2 days progress>0.9 READY
+  8 harvest yield 2-4
+  9a carrot ready after 2 days, 9b wither after extra 2 days, 9c clear
+  10 save/load round-trip
+  11a player plant consumes seed, 11b harvest adds wheat
+  12 nearby search
+  Preserved Phase7-14 tests.
 
-### Tests (Phase 12)
-- Test1 world maps 3 → PASS
-- Test2 current map exists → PASS
-- Test3 vision radius 8 → PASS
-- Test4 exploration current map discovered>0 → PASS
-- Test5 total exploration discovered>0 → PASS
-- Test6 map transitions >=0 → PASS
-- Test7 reveal all current map -> totalTiles → PASS
-- Test8 reset and re-explore -> >0 → PASS
-- Test9 all maps exploration 3 entries → PASS
-- Test10 fog/minimap toggles → PASS
-- Preserved Phase 11/10/9/8/7 → PASS
+### DebugManager Phase 15
+- Phase label 15, boxWidth 680, added farming debug via any (cropCount, plotCount etc) optional.
+
+### Tests (Phase 15)
+- Test1 CropDatabase count 4 → PASS
+- Test2 validation → PASS
+- Test3 createPlot → PASS
+- Test4 tillPlot → PASS
+- Test5 plantSeed wheat_seed → PASS
+- Test6 waterPlot boost → PASS
+- Test7 growth 2 days READY → PASS
+- Test8 harvest yield → PASS
+- Test9 wither and clear → PASS
+- Test10 save/load → PASS
+- Test11 player integration consume/add → PASS
+- Test12 nearby search → PASS
+- Preserved Phase14 inventory 27 items → PASS
+- Build passes, manual tsx farming lifecycle PASS
 
 ### Running
 
@@ -69,75 +105,70 @@ npm run dev
 # http://localhost:5173
 ```
 
-### Controls (Phase 12)
-- **WASD/Arrows** - Move player (blocked during dialogue), walk to edge road (N/S/E/W at 24,0 / 24,39 / 0,19 / 49,19) to travel between maps
-- **TAB** - Toggle minimap (top-right, shows explored tiles, player white, NPCs colored, buildings gray, vision circle)
-- **F** - Toggle fog of war (dark unexplored 0.95, dim explored 0.5), **Shift+F** - Toggle day/night overlay
-- **Shift+M** - Toggle full map (400x400 overlay)
-- **Shift+R** - Reveal all current map, **Ctrl+R** - Reset exploration
-- **Shift+[ / Shift+]** - Vision radius -1/+1 (1-20)
-- **F1/F2/F3** - Jump to village/forest/lake (test)
-- **E / Enter** - Interact NPC/building when prompt (💬)
-- **1-4** - Choose dialogue option (when open), else teleport safe positions (when closed, blocked if was open before)
-- **ESC** - Close dialogue
-- **O** - Toggle interaction prompt, **F12** - Test dialogue NPC001
-- **Q** - Toggle schedule debug (when dialogue closed)
-- **Shift+E** - Toggle clock
-- **; , .** - Toggle needs/inventory/jobs
-- **C** - Center on player, **V** - Village (center tile 25,20)
-- **Z** - Zoom 1/1.5/0.75, **X** - Smoothing 5/0/10
-- **K** - Collision overlay
-- **N** - Toggle NPC paths, **M** - Toggle nav grid (Shift+M full map)
-- **J/L/U/I** - Building doors/labels/ownership/fronts
-- **Space** - Pause/resume time (blocked when dialogue open), **= / +** - Faster x2 max 500x, **- / _** - Slower /2 min 1x, **]** - Advance 1 hour, **[** - Back 1 hour, **\** - Next phase
-- **Y** - All go home, **F5-F8** - NPC1-4 go home, **F9** - Toggle schedules, **F10** - Boost needs 100%, **F11** - Drain critical
-- **T** - Run all Phase7+8+9+10+11+12 tests, **P** - Print time+NPC+building+schedule+life+interaction+dialogue+exploration+world, **O** - Toggle obstacle
-- **5/6/7/8/9** - Pathfinding tests (blocked when dialogue open)
-- **G** - Grid, **B** - Tile coords, **` / F2 / D** - Debug, **H** - Help, **R** - Reset
+### Controls (Phase 15)
+- **WASD/Arrows** - Move player, walk to edge road to travel between maps
+- **TAB** - Toggle minimap
+- **F** - Toggle farming overlay (was F fog), **Shift+F** - Toggle fog of war, **Shift+M** full map
+- **E / Enter** - Interact NPC/building OR farming: near farmland/grass till soil, on TILLED plant if has seed (wheat_seed, carrot_seed, berry, herb), on growing water info, R to water, on READY (gold) harvest → adds wheat/carrot/berry/herb + bonus seeds, on WITHERED (💀) clear to tilled. Prioritizes NPC/building if prompt.
+- **R** - Water nearby plot (boost x1.5, lasts 0.5 days)
+- **I** - Open/Close Player Inventory (27 items), WASD/Arrows navigate, Shift+S sort, C filter, M merge, Shift+O random items (includes wheat/carrot seeds)
+- **Shift+P** - Create 6 test farm plots (debug, when no UI)
+- **P** - Print all including farming nearby plots
+- **T** - Run all Phase7-15 tests
+- **Ctrl+S** quick save Slot0, Ctrl+L quick load, Ctrl+Shift+S/L Save/Load UI, Ctrl+N new game, Auto-save 60s + map transition
+- **Shift+R** reveal all, Ctrl+R reset exploration, Shift+[ / ] vision, F1/F3/F4 jump maps
+- **Space** pause, =/+ faster, -/_ slower, ] +1h, [ -1h, \\ next phase, Shift+E clock
+- **Q** schedule debug, ; , . needs/inventory/jobs, F10 boost 100%, F11 drain
+- **C** center, **V** village, **Z** zoom, **X** smoothing, **K** collision, **N** paths, **M** nav grid, **J/L/U/Shift+I** building doors/labels/ownership/fronts
+- **G** grid, **B** coords, ` / F2 debug, **H** help, **R** reset
 
 ### Architecture
 
 ```
 src/
-├── exploration/
-│   ├── ExplorationSystem.ts - per map explored/visible boolean arrays, vision radius 8 circle, update reveals, percentages, transitions
-│   ├── ExplorationRenderer.ts - fog dark unexplored 0.95, dim explored 0.5, vision debug circle
-│   ├── MinimapRenderer.ts - top-right 150x150 minimap with terrain colors, buildings, NPCs, player, vision circle, full map 400x400 overlay
+├── farming/
+│   ├── Crop.ts - enums GrowthStage/PlotState, interfaces CropDefinition/FarmPlotData/FarmingSaveData, helpers
+│   ├── CropDatabase.ts - 4 crops wheat/carrot/berry_bush/herb, getCropBySeed, validation, register
+│   ├── FarmPlot.ts - till/plant/plantBySeed/water/update/harvest/clearWithered, progress calc effectiveElapsed*waterBoost/growthTime, wither
+│   ├── FarmingSystem.ts - createPlot checks FARMLAND/GRASS, tillPlot, plantSeed, plantCrop, waterPlot, harvestPlot, getPlot/hasPlot/getPlotsForMap/getAll/getNearby, update, save/load, clear, debug, fillWithTestPlots
+│   ├── FarmingRenderer.ts - renders tilled soil lines, stage icons/colors, progress bar blue if watered, ready gold glow, withered skull, plot info box
+│   ├── test_farming.ts - manual tsx tests 12 checks lifecycle
 │   └── README.md
-├── world/
-│   ├── World.ts - Phase 12 loads 3 maps village+forest+lake, getAllMaps, getAllMapsInfo, loadMap, entrances overridden
-│   ├── maps/
-│   │   ├── village_01.ts - 50x40 Greenhollow, 5 houses, river, bridge, square, farm
-│   │   ├── forest_01.ts - 50x40 Whispering Woods, 60% trees, clearing pond, 3 ruins
-│   │   └── lake_01.ts - 50x40 Crystal Lake, large lake 20x12, island, fishing hut, sandy shore
-│   ├── WorldMap.ts - map data, tileCounts, ascii
-│   └── WorldRenderer.ts - tile rendering with zoom
-├── interaction/ - preserved Phase 11 (range 60px, prompt)
-├── dialogue/ - preserved Phase 11 (role-based trees, placeholders, actions)
-├── life/ - preserved Phase 10 (needs, inventory, jobs)
-├── time/ - preserved Phase 9 (TimeManager, TimeRenderer)
-├── schedule/ - preserved Phase 9 (ScheduleManager)
-├── building/ - preserved Phase 8 (6 buildings village, 3 ruins forest, 1 hut lake)
-├── core/Game.ts - + ExplorationSystem/Renderer/MinimapRenderer, switchMap, handleMapTransitions, fog/minimap/full map rendering, TAB/F/Shift+M/Shift+R/Ctrl+R/F1-3 controls, T runs Phase7-12
-├── core/DebugManager.ts - + ExplorationDebugInfo/WorldDebugInfo, WORLD and EXPLORATION lines, Phase 12 boxWidth 620
-├── player/Player.ts - preserved with isDialogueOpen block, fixed E bug
-├── npc/ - preserved village only
-├── pathfinding/ - preserved A*
+├── inventory/
+│   ├── Item.ts - ItemType 27 types adds WHEAT,CARROT
+│   ├── ItemDatabase.ts - 27 items adds wheat/carrot harvest
+│   ├── Inventory.ts - stackable/non-stackable, slots, sorting
+│   └── InventoryRenderer.ts - grid UI
+├── save/
+│   ├── SaveTypes.ts - SAVE_VERSION 15, farming totals version2
+│   ├── SaveMigration.ts - case 15 migrateToV15
+│   └── SaveManager.ts - versioned slots
+├── exploration/ - fog, vision 8, minimap
+├── world/ - 3 maps village+forest+lake, transitions
+├── interaction/ - range 60px
+├── dialogue/ - role-based trees
+├── life/ - needs, inventory, jobs
+├── time/ - TimeManager totalSeconds
+├── core/Game.ts - + farmingSystem/renderer, F farming overlay, E/R farming input, save/load farming, P prints farming, T runs 7-15, Shift+P test plots
+├── core/DebugManager.ts - Phase 15
 └── main.ts
 ```
 
 ### Previous Phases
-- Phase 11: Interaction & Dialogue - E to talk 60px prioritize NPC, dialogue UI bottom box 600x400 speaker color wrapped text choices 1-4 ESC, role-based trees with placeholders, actions giveItem/restoreNeed, social++ happiness, building prompt, movement blocked during dialogue, time paused, teleport bug fixed (wasDialogueOpenBeforeInput)
-- Phase 10: NPC Life Simulation - Needs 5 types decay/restore, Inventory 10 items role-based, Jobs 6 types produce every 10s, LifeManager eating/interactions, LifeRenderer bars
-- Phase 9: Time & Schedules - TimeManager day phases, timeScale 60x, ScheduleManager 5 role schedules full coverage, NPC schedule changes
-- Phase 8: 6 buildings, doors walkable, homes valid, paths to home, occupancy
-- Phase 7: A* pathfinding, navigation grid, path request flow, failure handling WAITING retry, stuck detection, recalc limiting
-- Phase 6: NPC foundation 5 NPCs A↔B, role colors
-- Phase 5: Camera follow, clamp, smooth, zoom sync fixed
-- Phase 4: Collision WALKABLE/BLOCKED/INTERACTABLE, AABB sliding
-- Phase 3: Player 150px/s, 8-dir, IDLE/WALK, boundary
-- Phase 2: Village 50x40, 8 terrain, square, houses, farm, river+bridge
-- Phase 1: Game loop, renderer, input, debug
+- Phase14: Inventory 27 items (now), stackable/non-stackable, slots, sorting, save/load, UI I, Shift+S sort, C filter, M merge
+- Phase13: Save/Load 5 slots, validation, migration, corruption protection, auto-save 60s + map transition, new game
+- Phase12: Exploration fog, vision 8, minimap, world 3 maps transitions
+- Phase11: Interaction & Dialogue E 60px, dialogue UI, role trees
+- Phase10: NPC Life needs inventory jobs
+- Phase9: Time & Schedules
+- Phase8: Buildings homes
+- Phase7: Pathfinding A*
+- Phase6: NPC foundation
+- Phase5: Camera
+- Phase4: Collision
+- Phase3: Player
+- Phase2: World map
+- Phase1: Foundation
 
 ## Principles
 Small changes, test before expanding, no unnecessary complexity, modular, data-driven, debug everything, placeholder graphics first
