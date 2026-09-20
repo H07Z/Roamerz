@@ -1,5 +1,5 @@
 /**
- * Game - Phase 16.1 Animals / Livestock System
+ * Game - Phase 16.2 Crafting System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
@@ -7,7 +7,8 @@
  * - InventorySystem: data-driven ItemDatabase 27 items, stackable/non-stackable, slots, sorting
  * - FarmingSystem: data-driven CropDatabase 4 crops, till/plant/water/harvest/wither, growth based on TimeManager, persistence
  * - AnimalSystem: data-driven AnimalDatabase 4 animals, feed/pet/produce/wander, hunger/happiness, persistence
- * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI, animal UI
+ * - CraftingSystem: data-driven RecipeDatabase 12 recipes, ingredients consumption, result add, categories, persistence
+ * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI, animal UI, crafting UI
  */
 
 import { Renderer } from './Renderer';
@@ -62,6 +63,10 @@ import { AnimalSystem } from '../animals/AnimalSystem';
 import { AnimalRenderer } from '../animals/AnimalRenderer';
 import { AnimalState } from '../animals/Animal';
 import { AnimalInstance } from '../animals/AnimalInstance';
+import { RecipeDatabase } from '../crafting/RecipeDatabase';
+import { CraftingSystem } from '../crafting/CraftingSystem';
+import { CraftingRenderer } from '../crafting/CraftingRenderer';
+import { RecipeCategory } from '../crafting/Recipe';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -123,6 +128,13 @@ export class Game {
   private showAnimals: boolean = true;
   private showAnimalDebug: boolean = true;
   private selectedAnimalId: string | null = null;
+
+  // Phase 16.2 Crafting System
+  private recipeDatabase: RecipeDatabase;
+  private craftingSystem: CraftingSystem;
+  private craftingRenderer: CraftingRenderer;
+  private showCrafting: boolean = false;
+  private showCraftingDebug: boolean = true;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -198,12 +210,15 @@ export class Game {
     this.animalDatabase = AnimalDatabase.getInstance();
     this.animalSystem = new AnimalSystem(this.animalDatabase);
     this.animalRenderer = new AnimalRenderer();
+    this.recipeDatabase = RecipeDatabase.getInstance();
+    this.craftingSystem = new CraftingSystem(this.recipeDatabase);
+    this.craftingRenderer = new CraftingRenderer(this.itemDatabase, this.recipeDatabase);
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 16.1 - Animals / Livestock System...');
+    console.log('[Game] Initializing Phase 16.2 - Crafting System...');
 
     this.input.initialize(this.canvas);
 
@@ -328,6 +343,18 @@ export class Game {
         console.log(`[Game] AnimalSystem: ${this.animalSystem.getDebugString()}`);
         this.animalRenderer.setShowAnimals(this.showAnimals);
 
+        // Phase 16.2 Crafting System init
+        this.craftingSystem.initialize();
+        console.log(`[Game] RecipeDatabase: ${this.recipeDatabase.getCount()} recipes: ${this.recipeDatabase.getDebugString()}`);
+        const recipeValidation = this.recipeDatabase.validate();
+        if (!recipeValidation.valid) {
+          console.warn('[Game] RecipeDatabase validation errors:', recipeValidation.errors);
+        } else {
+          console.log('[Game] RecipeDatabase validation PASS');
+        }
+        console.log(`[Game] CraftingSystem: ${this.craftingSystem.getDebugString()}`);
+        this.craftingRenderer.setShowCrafting(this.showCrafting);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -342,7 +369,8 @@ export class Game {
 
         console.log(`[Game] Phase 15: Farming System - data-driven crops, till/plant/water/harvest/wither, time-based growth, persistence`);
         console.log(`[Game] Phase 16.1: Animals System - data-driven livestock, feed/pet/produce/wander, hunger/happiness, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 16.2: Crafting System - data-driven recipes, ingredients consumption, result add, categories, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -422,6 +450,7 @@ export class Game {
     const explorationSave = this.explorationSystem.getSaveData();
     const farmingSave = this.farmingSystem.getSaveData();
     const animalSave = this.animalSystem.getSaveData();
+    const craftingSave = this.craftingSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -439,6 +468,7 @@ export class Game {
       eventStates: { ...this.eventStates },
       farming: farmingSave,
       animals: animalSave,
+      crafting: craftingSave,
       weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
       economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: {},
@@ -540,6 +570,11 @@ export class Game {
         console.log(`[Game] Animals loaded: ${this.animalSystem.getDebugString()}`);
       }
 
+      if ((saveFile.world as any).crafting) {
+        this.craftingSystem.loadSaveData((saveFile.world as any).crafting);
+        console.log(`[Game] Crafting loaded: ${this.craftingSystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -587,7 +622,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -706,6 +741,7 @@ export class Game {
     this.farmingSystem.clear();
     this.animalSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
     this.animalSystem.clear();
+    this.craftingSystem.clear();
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
     const villageMapForAnimals = this.world.getMap('village_01') ?? this.world.getCurrentMap();
@@ -728,6 +764,7 @@ export class Game {
     this.inventorySortMode = SortMode.CATEGORY;
     this.showFarming = true;
     this.showAnimals = true;
+    this.showCrafting = false;
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -747,7 +784,8 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isInventoryOpen = this.showPlayerInventory;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen) return;
+    const isCraftingOpen = this.showCrafting;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -904,7 +942,8 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isInventoryOpen = this.showPlayerInventory;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen) return;
+    const isCraftingOpen = this.showCrafting;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -992,11 +1031,114 @@ export class Game {
     }
   }
 
-  // ==================== PHASE 14 INVENTORY INPUT ====================
+  // ==================== PHASE 16.2 CRAFTING INPUT ====================
+
+  private handleCraftingInput(): void {
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (this.showCrafting) {
+      if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift'))) {
+        this.showCrafting = false;
+        console.log('[Crafting] Closed crafting UI');
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        const filteredCount = (this.craftingRenderer as any).getFilteredRecipes ? 0 : 0;
+        // Use craftingRenderer navigate with filtered length
+        // We need to compute filtered length here
+        const tempFiltered = this.craftingSystem.getUnlockedRecipes().filter(r => {
+          const cat = this.craftingRenderer.getFilterCategory();
+          if (cat && r.category !== cat) return false;
+          if (this.craftingRenderer.getShowOnlyCraftable() && this.player) {
+            const can = this.craftingSystem.canCraft(r.id, this.player.getInventory());
+            return can.can;
+          }
+          return true;
+        });
+        this.craftingRenderer.navigate('up', tempFiltered.length);
+      }
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        const tempFiltered = this.craftingSystem.getUnlockedRecipes().filter(r => {
+          const cat = this.craftingRenderer.getFilterCategory();
+          if (cat && r.category !== cat) return false;
+          if (this.craftingRenderer.getShowOnlyCraftable() && this.player) {
+            const can = this.craftingSystem.canCraft(r.id, this.player.getInventory());
+            return can.can;
+          }
+          return true;
+        });
+        this.craftingRenderer.navigate('down', tempFiltered.length);
+      }
+
+      if (this.input.isKeyJustPressed('c') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        const categories: (RecipeCategory | null)[] = [null, RecipeCategory.TOOL, RecipeCategory.FOOD, RecipeCategory.MATERIAL, RecipeCategory.FEED, RecipeCategory.POTION, RecipeCategory.MISC];
+        const current = this.craftingRenderer.getFilterCategory();
+        const idx = categories.indexOf(current as any);
+        const next = categories[(idx + 1) % categories.length];
+        this.craftingRenderer.setFilterCategory(next);
+        console.log(`[Crafting] Filter: ${next ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.craftingRenderer.toggleCraftableFilter();
+        console.log(`[Crafting] Craftable only: ${this.craftingRenderer.getShowOnlyCraftable() ? 'ON' : 'OFF'}`);
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        if (!this.player) return;
+        const filtered = (() => {
+          let recipes = this.craftingSystem.getUnlockedRecipes();
+          const cat = this.craftingRenderer.getFilterCategory();
+          if (cat) recipes = recipes.filter(r => r.category === cat);
+          if (this.craftingRenderer.getShowOnlyCraftable()) {
+            recipes = recipes.filter(r => this.craftingSystem.canCraft(r.id, this.player!.getInventory()).can);
+          }
+          recipes.sort((a,b) => {
+            if (a.category !== b.category) return a.category.localeCompare(b.category);
+            return a.name.localeCompare(b.name);
+          });
+          return recipes;
+        })();
+        const idx = this.craftingRenderer.getSelectedIndex();
+        if (idx >= 0 && idx < filtered.length) {
+          const recipe = filtered[idx];
+          const result = this.craftingSystem.craft(recipe.id, this.player.getInventory());
+          if (result.success) {
+            console.log(`[Crafting] Crafted ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
+            this.saveRenderer.showMessage(`🔨 Crafted ${result.resultQuantity}x ${result.resultItemId}!`, '#8f8', 2);
+          } else {
+            console.log(`[Crafting] Craft failed: ${result.reason}`);
+            this.saveRenderer.showMessage(`❌ Craft failed: ${result.reason}`, '#f88', 2);
+          }
+        }
+      }
+
+      return;
+    }
+
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory) {
+      if (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.showCrafting = !this.showCrafting;
+        if (this.showCrafting) {
+          console.log('[Crafting] Opened crafting UI');
+          // Reset selected index
+          this.craftingRenderer.setSelectedIndex(0);
+        } else {
+          console.log('[Crafting] Closed crafting UI');
+        }
+        return;
+      }
+    }
+  }
+
+  // ==================== PHASE 14 INVENTORY INPUT ==================== ====================
 
   private handleInventoryInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
+    const isCraftingOpen = this.showCrafting;
 
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
@@ -1050,7 +1192,7 @@ export class Game {
       return;
     }
 
-    if (!isDialogueOpen && !isSaveUIOpen) {
+    if (!isDialogueOpen && !isSaveUIOpen && !isCraftingOpen) {
       if (this.input.isKeyJustPressed('i') && !this.input.isKeyDown('control')) {
         if (this.input.isKeyDown('shift')) {
           return;
@@ -1268,6 +1410,7 @@ export class Game {
     if (this.dialogueManager.isOpen()) return;
     if (this.saveRenderer.isShowingUI()) return;
     if (this.showPlayerInventory) return;
+    if (this.showCrafting) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1331,13 +1474,13 @@ export class Game {
 
     if (this.autoSaveTimer >= this.autoSaveInterval) {
       this.autoSaveTimer = 0;
-      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
         console.log('[Save] Auto-save triggered');
         this.saveGame(AUTO_SAVE_SLOT);
       }
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory) {
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
       this.timeManager.update(deltaTime);
     }
 
@@ -1402,12 +1545,13 @@ export class Game {
       const isVillage = map.mapId === 'village_01';
       const isSaveUIOpen = this.saveRenderer.isShowingUI();
       const isInventoryOpen = this.showPlayerInventory;
-      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen) {
+      const isCraftingOpen = this.showCrafting;
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
@@ -1416,12 +1560,13 @@ export class Game {
       }
 
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      if (!isSaveUIOpen && !isInventoryOpen) {
+      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
         this.handleDialogueInput();
       }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
 
       this.handleInventoryInput();
+      this.handleCraftingInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
@@ -1715,6 +1860,17 @@ export class Game {
           showAnimals: this.showAnimals
         });
       }
+
+      if (this.craftingSystem) {
+        (this.debug as any).setCraftingInfo?.({
+          recipeCount: this.recipeDatabase.getCount(),
+          recipes: this.recipeDatabase.getAllRecipes().map(r=>r.id),
+          unlockedCount: this.craftingSystem.getUnlockedRecipes().length,
+          totalCrafted: this.craftingSystem.getTotalCrafted(),
+          debug: this.craftingSystem.getDebugString(),
+          showCrafting: this.showCrafting
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -1822,7 +1978,7 @@ export class Game {
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
 
-    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory) return;
+    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting) return;
 
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
@@ -1931,6 +2087,13 @@ export class Game {
       this.showAnimals = !this.showAnimals;
       this.animalRenderer.setShowAnimals(this.showAnimals);
       console.log(`[Animals] Overlay: ${this.showAnimals ? 'ON' : 'OFF'}`);
+    }
+
+    // Phase 16.2 Crafting toggle - Shift+C handled in handleCraftingInput, but also debug toggle
+    if (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
+      // Ctrl+Shift+C debug crafting list
+      console.log(`[Crafting] ${this.craftingSystem.getDebugString()}`);
+      this.craftingSystem.debugPrint();
     }
 
     if (this.input.isKeyJustPressed('tab')) {
@@ -2043,7 +2206,7 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1 Test] Running all tests...');
+      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1+16.2 Test] Running all tests...');
       this.runPhase7Tests();
       this.runPhase8Tests();
       this.runPhase9Tests();
@@ -2054,6 +2217,7 @@ export class Game {
       this.runPhase14Tests();
       this.runPhase15Tests();
       this.runPhase16_1Tests();
+      this.runPhase16_2Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift')) {
@@ -2725,6 +2889,90 @@ export class Game {
     console.log(`[Animals] ${this.animalSystem.getDebugString()} | Types: ${this.animalDatabase.getDebugString()}`);
   }
 
+  private runPhase16_2Tests(): void {
+    console.log('=== PHASE 16.2 TESTS - CRAFTING SYSTEM ===');
+
+    const recipeCount = this.recipeDatabase.getCount();
+    console.log(`Test1 RecipeDatabase count: ${recipeCount} recipes (expected 12) -> ${recipeCount===12 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Recipes: ${this.recipeDatabase.getDebugString()}`);
+
+    const validation = this.recipeDatabase.validate();
+    console.log(`Test2 RecipeDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const testInv = new Inventory(20, this.itemDatabase);
+    testInv.addItem('wood', 5);
+    testInv.addItem('stone', 3);
+    console.log(`Test3 Inventory has wood 5 stone 3: wood=${testInv.getItemQuantity('wood')} stone=${testInv.getItemQuantity('stone')} -> ${testInv.getItemQuantity('wood')===5 && testInv.getItemQuantity('stone')===3 ? 'PASS' : 'FAIL'}`);
+
+    const canAxe = this.craftingSystem.canCraft('craft_axe', testInv);
+    console.log(`Test4 canCraft axe with 3 wood 2 stone: ${canAxe.can ? 'PASS' : 'FAIL'} reason=${canAxe.reason ?? 'ok'}`);
+
+    const craftAxe = this.craftingSystem.craft('craft_axe', testInv);
+    console.log(`Test5 craft axe: success=${craftAxe.success} result=${craftAxe.resultItemId} qty=${craftAxe.resultQuantity} -> ${craftAxe.success && craftAxe.resultItemId==='axe' ? 'PASS' : 'FAIL'}`);
+    console.log(`  After craft: wood=${testInv.getItemQuantity('wood')} expected 2, stone=${testInv.getItemQuantity('stone')} expected 1, axe=${testInv.getItemQuantity('axe')} expected 1 -> ${testInv.getItemQuantity('wood')===2 && testInv.getItemQuantity('stone')===1 && testInv.getItemQuantity('axe')===1 ? 'PASS' : 'FAIL'}`);
+
+    const canAxeAgain = this.craftingSystem.canCraft('craft_axe', testInv);
+    console.log(`Test6 canCraft axe again with 2 wood 1 stone: ${!canAxeAgain.can ? 'PASS (should fail missing)' : 'FAIL'} missing=${canAxeAgain.missing?.map(m=>m.itemId).join(',')}`);
+
+    // Test bread crafting
+    testInv.clearInventory();
+    testInv.addItem('wheat', 3);
+    const canBread = this.craftingSystem.canCraft('craft_bread', testInv);
+    console.log(`Test7 canCraft bread with 3 wheat: ${canBread.can ? 'PASS' : 'FAIL'}`);
+    const craftBread = this.craftingSystem.craft('craft_bread', testInv);
+    console.log(`Test7b craft bread: success=${craftBread.success} bread qty=${testInv.getItemQuantity('bread')} expected 1 -> ${craftBread.success && testInv.getItemQuantity('bread')===1 ? 'PASS' : 'FAIL'}`);
+
+    // Test hay crafting
+    testInv.clearInventory();
+    testInv.addItem('wheat', 2);
+    const craftHay = this.craftingSystem.craft('craft_hay', testInv);
+    console.log(`Test8 craft hay 2 wheat -> 2 hay: success=${craftHay.success} hay=${testInv.getItemQuantity('hay')} expected 2 -> ${craftHay.success && testInv.getItemQuantity('hay')===2 ? 'PASS' : 'FAIL'}`);
+
+    // Test animal_feed crafting
+    testInv.clearInventory();
+    testInv.addItem('hay', 2);
+    testInv.addItem('wheat', 1);
+    testInv.addItem('carrot', 1);
+    const craftFeed = this.craftingSystem.craft('craft_animal_feed', testInv);
+    console.log(`Test9 craft animal_feed: success=${craftFeed.success} feed=${testInv.getItemQuantity('animal_feed')} expected 3 -> ${craftFeed.success && testInv.getItemQuantity('animal_feed')===3 ? 'PASS' : 'FAIL'}`);
+
+    // Test craftable list
+    testInv.clearInventory();
+    testInv.addItem('wood', 10);
+    testInv.addItem('stone', 10);
+    testInv.addItem('ore', 5);
+    testInv.addItem('fiber', 5);
+    testInv.addItem('wheat', 5);
+    const craftable = this.craftingSystem.getCraftableRecipes(testInv);
+    console.log(`Test10 getCraftableRecipes with wood10 stone10 ore5 fiber5 wheat5: found ${craftable.length} -> ${craftable.length>=4 ? 'PASS' : 'FAIL'} ${craftable.map(r=>r.id).join(',')}`);
+
+    // Test save/load
+    const saveData = this.craftingSystem.getSaveData();
+    console.log(`Test11 getSaveData: totalCrafted=${saveData.totalCrafted} unlocked=${saveData.recipesUnlocked.length} -> ${saveData.totalCrafted>=4 ? 'PASS' : 'FAIL'}`);
+    const newCrafting = new CraftingSystem(this.recipeDatabase);
+    newCrafting.loadSaveData(saveData);
+    console.log(`Test11b loadSaveData: totalCrafted=${newCrafting.getTotalCrafted()} expected ${saveData.totalCrafted} -> ${newCrafting.getTotalCrafted()===saveData.totalCrafted ? 'PASS' : 'FAIL'}`);
+
+    // Test player integration
+    if (this.player) {
+      this.player.getInventory().clearInventory();
+      this.player.addItem('wood', 3);
+      this.player.addItem('stone', 2);
+      const beforeAxe = this.player.getItemQuantity('axe');
+      const res = this.craftingSystem.craft('craft_axe', this.player.getInventory());
+      const afterAxe = this.player.getItemQuantity('axe');
+      console.log(`Test12 player craft axe: before ${beforeAxe} after ${afterAxe} expected ${beforeAxe+1} success=${res.success} -> ${res.success && afterAxe===beforeAxe+1 ? 'PASS' : 'FAIL'}`);
+      // Cleanup
+      this.player.removeItem('axe', 1);
+      this.player.removeItem('wood', this.player.getItemQuantity('wood'));
+      this.player.removeItem('stone', this.player.getItemQuantity('stone'));
+    }
+
+    console.log('=== END PHASE 16.2 TESTS ===');
+    console.log(`[Crafting] ${this.craftingSystem.getDebugString()} | Recipes: ${this.recipeDatabase.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -2822,8 +3070,15 @@ export class Game {
       this.inventoryRenderer.render(ctx, w, h, this.player.getInventory());
     }
 
+    if (this.showCrafting && this.player) {
+      this.craftingRenderer.render(ctx, w, h, this.craftingSystem, this.player.getInventory());
+    } else if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
+      // Quick hint for craftable
+      this.craftingRenderer.renderQuickHint(ctx, w, h, this.craftingSystem, this.player.getInventory());
+    }
+
     // Farming selected plot info (when not in inventory)
-    if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
@@ -2831,7 +3086,7 @@ export class Game {
     }
 
     // Animals selected info
-    if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
       const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
       if (animal) {
         this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
@@ -2848,7 +3103,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -2921,7 +3176,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 16.1 - ANIMALS / LIVESTOCK SYSTEM',
+      'PHASE 16.2 - CRAFTING SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -2966,12 +3221,17 @@ export class Game {
       '  Produce: chicken egg 0.5d, cow milk 1d, sheep wool 1.5d, pig truffle 2d, needs hunger/happiness thresholds',
       '  Pet: increases happiness, wander: animals move within radius from home if walkable',
       '  Shift+U - Create 4 test animals (chicken,cow,sheep,pig) debug',
-      '  P - Print all including animals nearby, T - Run all tests 7-16.1',
+      'Crafting System (Phase 16.2):',
+      '  Shift+C - Toggle crafting UI (avoid WASD)',
+      '  W/S - Navigate recipes, C filter category, Shift+C toggle craftable only, Enter craft',
+      '  Recipes: axe, pickaxe, fishing_rod, sickle, bread, egg bread, hay, animal_feed, health_potion, stamina_potion, fiber, coin',
+      '  Ingredients consumed from inventory, result added',
+      '  Ctrl+Shift+C - Debug print crafting, P - Print all, T - Run all tests 7-16.2',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length}`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -3068,8 +3328,12 @@ export class Game {
   getAnimalDatabase(): AnimalDatabase { return this.animalDatabase; }
   getAnimalSystem(): AnimalSystem { return this.animalSystem; }
   getAnimalRenderer(): AnimalRenderer { return this.animalRenderer; }
+  getRecipeDatabase(): RecipeDatabase { return this.recipeDatabase; }
+  getCraftingSystem(): CraftingSystem { return this.craftingSystem; }
+  getCraftingRenderer(): CraftingRenderer { return this.craftingRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
   isAnimalsShowing(): boolean { return this.showAnimals; }
+  isCraftingShowing(): boolean { return this.showCrafting; }
   isGameRunning(): boolean { return this.isRunning; }
 }

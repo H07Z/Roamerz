@@ -20,92 +20,91 @@ PHASE 12 — Exploration & World Expansion [COMPLETE]
 PHASE 13 — Save/Load & World Persistence [COMPLETE]
 PHASE 14 — Inventory System [COMPLETE]
 PHASE 15 — Farming System [COMPLETE]
-PHASE 16.1 — Animals / Livestock System [CURRENT]
-PHASE 16.2 — Crafting System [NEXT]
+PHASE 16.1 — Animals / Livestock System [COMPLETE]
+PHASE 16.2 — Crafting System [CURRENT]
 PHASE 16.3 — Cooking System
 PHASE 16.4 — Weather System
 PHASE 16.5 — Economy / Shop System
 ```
 
-## Phase 16.1 - Animals / Livestock System [CURRENT]
+## Phase 16.2 - Crafting System [CURRENT]
 
 ### Objective
-Data-driven livestock that need feeding, produce items, can be petted, wander, and persist per map. Small changes, preserve farming & inventory, placeholder graphics, modular.
+Data-driven crafting recipes, ingredients consumption via inventory, result addItem, categories TOOL/FOOD/MATERIAL/FEED/POTION/MISC, optional station/tool, persistence crafted counts, debug, small controlled phase, preserve farming/animals/inventory.
 
-### Animal System
-- **Animal.ts**: AnimalState IDLE/WANDERING/EATING/SLEEPING/PRODUCING/HAPPY/HUNGRY/SICK, AnimalType CHICKEN/COW/SHEEP/PIG, AnimalDefinition {id, type, name, icon, color, description, produceItemId, produceIntervalSeconds, produceMin/Max, produceChance, feedItems[], feedValue, happinessOnFeed/Pet, hungerDecayPerDay, happinessDecayPerDay, minHunger/HappinessForProduce, wanderRadius, wanderIntervalSeconds, speed, maxHunger/Happiness/Health, tags}, AnimalData {id, type, x,y, pixelX/Y, mapId, state, hunger/happiness/health 0-100, ageDays, lastFedAt/lastProduceAt/lastWanderAt/lastUpdateAt, produceReady, homeX/Y, targetX/Y, produceCount/petCount/feedCount, isMoving, version}, AnimalSaveData {animals Record, totalCreated/Collected/Fed/Petted, version}, helpers createEmptyAnimalData, getAnimalStateFromNeeds
-- **AnimalDatabase.ts**: 4 animals data-driven:
-  - chicken 🐔 egg 0.5d feed wheat_seed/wheat/hay/animal_feed, produce 1-2 egg 90% chance, wander 3 tiles every 10s speed 20
-  - cow 🐄 milk 1d feed hay/wheat/animal_feed/carrot, produce 1-2 milk 80%, wander 4 tiles 15s speed 15
-  - sheep 🐑 wool 1.5d feed hay/wheat/animal_feed/carrot/berry, produce 1-3 wool 85%, wander 3 tiles 12s speed 18
-  - pig 🐖 truffle 2d feed everything, produce 1 truffle 50%, wander 5 tiles 8s speed 22
-  Methods getAnimal, getAllAnimals, getCount, hasAnimal, register/unregister, validate, getDebugString
-- **AnimalInstance.ts**: single animal logic feed(feedItemId,totalSeconds) checks allowed feeds, hunger+=feedValue capped, happiness+=happinessOnFeed, state EATING, pet() happiness+=happinessOnPet state HAPPY, collectProduce() chance check quantity min-max, reset produceReady/lastProduceAt, update(totalSeconds,deltaTime,isWalkable) decays hunger/happiness per day (hungerDecayPerDay, happinessDecayPerDay, extra if hungry), health loss if starving <10 hunger, produce ready if interval passed and hunger>=minHungerForProduce and happiness>=minHappinessForProduce and health>20, wander every wanderInterval 50% chance pick random target within radius from home if walkable, move towards target speed*deltaTime pixel, update tile from pixel, state from needs via getAnimalStateFromNeeds, save/load, debug strings
-- **AnimalSystem.ts**: manager Map<id,AnimalInstance>, database, totals created/collected/fed/petted, version 2. initialize(maps) logs. createAnimal(x,y,mapId,type,totalSeconds,worldMap,navGrid) checks bounds and walkable (warn if not), id animal_x_y_mapId_created_type, increments created. createAnimalSimple, getAnimal, getAnimalAt, hasAnimal, getAnimalsForMap/getAll/getCount/getNearbyAnimals radius search, feedAnimal/petAnimal/collectProduce and At variants (nearby 2 tiles, prefer produce ready), update(totalSeconds,deltaTime,navGrid) calls animal.update with walkable lambda, getSaveData/loadSaveData with totals version, clear/clearMap, getDebugString Ready/Hungry/Happy counts, getMapDebugString, debugPrint, fillWithTestAnimals 4 types at 12,32
-- **AnimalRenderer.ts**: render(ctx,animalSystem,worldRenderer,camera,mapId,w,h) if showAnimals, gets animals for map, culls, renders bg color per state (hungry red 0.3, happy green 0.3, producing gold 0.4, sick dark red 0.4, eating blue 0.3, wandering gray 0.2), icon scaled 0.8, produce ready gold glow stroke + fill + produce icon 🥚/🥛/🧶/✨ top-right, hunger bar bottom (red<30 yellow<60 green) and happiness bar above (blue), state text 4 chars when zoom>=1.2, renderAnimalInfo box 340x130 at 20,h-220 above farming info showing state hunger/happy/health, description, produce interval chance, feed items, needs, actions [Collect:E] or [Feed:E][Pet:E], age/home/target/moving
+### Crafting System
+- **Recipe.ts**: RecipeCategory TOOL/FOOD/MATERIAL/FEED/POTION/MISC, RecipeIngredient {itemId,quantity}, RecipeDefinition {id,name,resultItemId,resultQuantity,ingredients[],category,requiredStation?,requiredTool?,timeSeconds?,description,icon,unlockedByDefault,tags?}, CraftingSaveData {recipesUnlocked:string[], totalCrafted, craftedCounts:Record, version}, createDefaultCraftingSaveData
+- **RecipeDatabase.ts**: 12 recipes data-driven:
+  - craft_axe 🪓 3 wood+2 stone → 1 axe TOOL
+  - craft_pickaxe ⛏️ 3 wood+3 stone+1 ore → 1 pickaxe TOOL
+  - craft_fishing_rod 🎣 3 wood+2 fiber → 1 fishing_rod TOOL
+  - craft_sickle 🔪 2 wood+1 ore → 1 sickle TOOL
+  - craft_bread 🍞 3 wheat → 1 bread FOOD
+  - craft_bread_egg 🍞 2 wheat+1 egg → 2 bread FOOD (animal product integration)
+  - craft_hay 🌾 2 wheat → 2 hay FEED (farm → feed)
+  - craft_animal_feed 🥣 2 hay+1 wheat+1 carrot → 3 animal_feed FEED
+  - craft_health_potion 🧪 2 herb+1 mushroom → 1 health_potion POTION
+  - craft_stamina_potion ⚗️ 1 herb+2 berry+1 mushroom → 1 stamina_potion POTION
+  - craft_fiber 🧵 1 wood → 2 fiber MATERIAL
+  - craft_coin 🪙 1 ore → 10 coin MATERIAL
+  Methods getRecipe, getAllRecipes, getRecipesByCategory, getUnlockedRecipes, getCount, hasRecipe, register/unregister, validate, getDebugString
+- **CraftingSystem.ts**: manager database, recipesUnlocked Set (default unlocked), totalCrafted, craftedCounts Map, version 1. initialize logs. getDatabase, getUnlockedRecipeIds, getUnlockedRecipes, isUnlocked, unlockRecipe. canCraft(recipeId, inventory) checks exists, unlocked, missing ingredients {itemId,need,have}[], hasSpace with freeing slot logic (if ingredient qty==have, slot will free). craft(recipeId, inventory) checks canCraft, removes ingredients, adds result, rollback if add fails, increments totalCrafted and craftedCounts. getCraftableRecipes(inventory) filters unlocked by canCraft. getTotalCrafted, getCraftedCount, getSaveData/loadSaveData (preserves unlocked default + totals), clear, getDebugString, debugPrint
+- **CraftingRenderer.ts**: render(ctx,w,h,craftingSystem,inventory) if showCrafting: box 640x500 center, title 🔨 CRAFTING, stats recipes filtered/total, craftable, totalCrafted, filter. Instructions Shift+C/ESC close, W/S navigate, Enter craft, C filter category, Shift+C toggle craftable only. Left panel list 240x350 rows 36, bg per row, category color dot (TOOL yellow, FOOD green, MATERIAL gray, FEED orange, POTION magenta, MISC cyan), icon, name, result icon+qty+name, ✓ craftable green / ✗ red. Scroll offset selectedIndex-visibleRows. Right panel detail  detailW = boxW-listW-60, shows icon name, category ID, description wrapped 42 chars, result with value stack rarity, ingredients list with have/need ✓/✗ green/red, craft status can/cannot reason, missing list, crafted count, action hint green box Enter to Craft. Footer version counts. renderQuickHint if not showing and craftable>0: small box 200x22 top-right 60px “🔨 X craftable! Press Shift+C”
+- **test_crafting.ts**: manual tsx 15 checks: count 12, validation, categories TOOL 4 FEED 2, inventory wood5 stone3, canCraft axe, craft axe consumes 3 wood 2 stone adds axe, canCraft again fails missing, bread 3 wheat→1 bread, hay 2 wheat→2 hay, animal_feed, craftable list with many mats >=6, save/load round-trip, coin 1 ore→10 coin, health potion 2 herb+1 mushroom
 
-### Inventory Extension Phase 16.1
-- **Item.ts**: adds EGG, MILK, WOOL, HAY, ANIMAL_FEED, TRUFFLE (now 33 types)
-- **ItemDatabase.ts**: 33 items, adds:
-  - egg 🥚 value8 hunger20 health2 food animal farm cooking
-  - milk 🥛 value12 hunger25 health5 stamina10 food animal farm cooking
-  - wool 🧶 value15 material animal farm craftable
-  - hay 🌾 value3 material feed farm animal
-  - animal_feed 🥣 value5 material feed farm animal craftable
-  - truffle 🍄 value50 rare food animal farm treasure cooking
+### Save Extension Phase 16.2
+- **SaveTypes.ts**: SAVE_VERSION 17 SAVE_GAME_VERSION 0.17.0, WorldSaveData.crafting now {recipesUnlocked, totalCrafted, craftedCounts, version:1} default {[],0,{},1}
+- **SaveMigration.ts**: case 17 migrateToV17: old crafting missing → new {recipesUnlocked=[], totalCrafted 0, craftedCounts {}, version1}, preserves farming totals and animals totals
 
-### Save Extension Phase 16.1
-- **SaveTypes.ts**: SAVE_VERSION 16 SAVE_GAME_VERSION 0.16.0, WorldSaveData.animals now {animals, totalCreated, totalCollected, totalFed, totalPetted, version:2} default
-- **SaveMigration.ts**: case 16 migrateToV16: old animals {animals, version1} → new {animals, totalCreated=count, totalCollected 0, totalFed 0, totalPetted 0, version2}
-
-### Game Integration Phase 16.1
-- **Fields**: animalDatabase singleton, animalSystem, animalRenderer, showAnimals true, showAnimalDebug true, selectedAnimalId
-- **Initialize**: world 3 maps, exploration, collision/nav/pathfinder/building, time, schedule, NPCs, life, interaction, dialogue, exploration initial, fog/minimap, save slots, ItemDatabase 33 items validation PASS, Inventory, FarmingSystem init + CropDatabase 4 crops validation PASS, AnimalSystem init with maps + AnimalDatabase 4 animals validation PASS, set showAnimals, log Phase 16.1 controls
-- **CollectSaveData**: animalSave = animalSystem.getSaveData() included in worldSave.animals
-- **ApplySaveData**: if saveFile.world.animals load via animalSystem.loadSaveData
-- **NewGame**: animalSystem initialize + clear, reset showAnimals
-- **handleAnimalInput**: if no player or dialogue/save/inventory open return, get map tilePos totalSeconds, getNearbyAnimals radius2 find closest, selectedAnimalId = closest if dist<=2 else clear if >3. E key: if hasInteractable (NPC/building) return to let dialogue handle. Check nearby plots distance for priority: animalIsCloserOrReady = closestAnimal && (produceReady || dist <= closestPlotDist). If animal closer or ready and dist<=2:
-  - produceReady → collectProduce, addItem produceItemId quantity, message
-  - else try feedItems ['hay','animal_feed','wheat','wheat_seed','carrot','berry','apple','carrot_seed','mushroom'] if player hasItem and allowed per def, feedAnimal, removeItem feed, message
-  - else petAnimal, message
-- **Update**: timeManager update if no UI, farmingSystem.update(totalSeconds,deltaTime), animalSystem.update(totalSeconds,deltaTime,navigationGrid), player update, camera, exploration update, map transitions, debug player/collision, NPCs village only, life, interaction, dialogue input, inventory input, farming input, animal input, save input, debug NPC/pathfinding/building/time/schedule/life/interaction/dialogue/exploration/world/save/inventory/farming/animal (animalCount, animals, totalCount, mapCount, debug, mapDebug, showAnimals), mapInfo, cameraInfo, handleDebugToggles
-- **Render**: clear, worldRenderer, collision debug, nav grid debug, buildingRenderer, building fronts, farmingRenderer.render, animalRenderer.render (before fog), fog, NPCs village only, playerRenderer, vision debug, time overlay/clock/timeline, minimap, full map, interaction prompt if !dialogue&&!save&&!inventory, dialogue, inventoryRenderer, farming selected plot info, animal selected info above farming, saveRenderer, debug, help, map edge hint
-- **Controls**: Shift+G toggle animals overlay (avoid WASD), Shift+U create 4 test animals (chicken,cow,sheep,pig), F farming overlay, Shift+F fog, E feed/collect/pet (priority: NPC/building > animal produce ready/closer > farming), R water farm, Shift+P test farm plots, P prints farming+animals nearby + debug, T runs all tests 7-16.1
-- **Tests**: runPhase16_1Tests 12 tests:
-  1 AnimalDatabase count 4
+### Game Integration Phase 16.2
+- **Fields**: recipeDatabase singleton, craftingSystem, craftingRenderer, showCrafting false, showCraftingDebug true
+- **Constructor**: recipeDatabase = RecipeDatabase.getInstance(), craftingSystem = new CraftingSystem(recipeDatabase), craftingRenderer = new CraftingRenderer(itemDatabase, recipeDatabase)
+- **Initialize**: log Phase 16.2, craftingSystem.initialize, RecipeDatabase count 12 debug, validation PASS, CraftingSystem debug, setShowCrafting false, logs Phase 16.2 controls
+- **CollectSaveData**: craftingSave = craftingSystem.getSaveData() included in worldSave.crafting
+- **ApplySaveData**: if (world as any).crafting load via craftingSystem.loadSaveData
+- **NewGame**: craftingSystem.clear, reset showCrafting false
+- **handleCraftingInput**: if showCrafting: ESC or Shift+C closes, W/S navigate filtered list (filter category + craftable only if player inventory), C cycles categories [null,TOOL,FOOD,MATERIAL,FEED,POTION,MISC], Shift+C toggles craftable only, Enter crafts selected recipe via craftingSystem.craft(player.inventory) add/remove, message 🔨 Crafted or ❌ failed. If not open and no dialogue/save/inventory: Shift+C toggles open, reset selectedIndex 0
+- **Other inputs**: handleFarmingInput, handleAnimalInput, handleInventoryInput, handleMapTransitions, auto-save, time update, NPC/life, dialogue input all now also check isCraftingOpen to block. handleInventoryInput second check includes crafting open. Update calls handleCraftingInput after inventory before farming/animal
+- **Debug**: farmingInfo, animalInfo, inventoryInfo, craftingInfo via DebugManager new interfaces. DebugManager phase label 17, box height includes farming/animal/inventory/crafting, renders INVENTORY, FARMING, ANIMALS, CRAFTING lines with counts and debug
+- **Render**: if showCrafting && player → craftingRenderer.render, else if not inventory/dialogue/save → renderQuickHint with craftable count. Farming selected plot info and animals selected info now also require !showCrafting. Map edge hint also requires !showCrafting
+- **Controls**: Shift+C toggle crafting UI (avoid WASD conflict, debug toggle uses F2/`), W/S navigate, Enter craft, C filter category, Shift+C toggle craftable only, Ctrl+Shift+C debug print crafting
+- **Tests**: runPhase16_2Tests 12 tests:
+  1 RecipeDatabase count 12
   2 validation
-  3 createAnimal chicken
-  4 feed wheat_seed hunger up
-  5 pet happy up
-  6 produce after 0.6d ready
-  7 collect egg
-  8 hunger decay after 3d <50
-  9 wander logic
-  10 save/load round-trip
-  11a player feed consumes hay, 11b collect adds milk (chance may fail)
-  12 nearby search
-  Preserved Phase15 farming, Phase14 inventory 33 items, etc.
+  3 inventory wood5 stone3
+  4 canCraft axe
+  5 craft axe consumes adds
+  6 canCraft again fails missing
+  7 canCraft bread + craft
+  8 hay
+  9 animal_feed
+  10 craftable list >=4
+  11 save/load round-trip preserves totalCrafted
+  12 player craft axe integration
+  Preserved Phase16.1 animals, Phase15 farming, Phase14 inventory
 
-### DebugManager Phase 16.1
-- Phase label 16.1, boxWidth 680, added animal debug via any optional
+### DebugManager Phase 16.2
+- Phase label 17, added FarmingDebugInfo, AnimalDebugInfo, InventoryDebugInfo, CraftingDebugInfo interfaces, fields, setters setFarmingInfo/setAnimalInfo/setInventoryInfo/setCraftingInfo, boxHeight includes new heights, renders INVENTORY DB count categories player used/capacity value count sort UI debug, FARMING crops debug map, ANIMALS types debug map, CRAFTING recipes unlocked crafted debug UI
 
-### Tests (Phase 16.1)
-- Test1 AnimalDatabase count 4 → PASS
+### Tests (Phase 16.2)
+- Test1 RecipeDatabase count 12 → PASS
 - Test2 validation → PASS
-- Test3 createAnimal chicken → PASS
-- Test4 feed → PASS hunger up
-- Test5 pet → PASS happy up
-- Test6 produce after 0.6d → PASS READY
-- Test7 collect → PASS egg 1-2
-- Test8 hunger decay 3d <50 → PASS
-- Test9 wander → PASS
-- Test10 save/load → PASS
-- Test11 player feed/collect → PASS (chance)
-- Test12 nearby search → PASS
-- Preserved Phase15 farming 4 crops → PASS
-- Inventory 33 items → PASS
-- Build 71 modules → PASS
-- Manual tsx animals lifecycle PASS
+- Test3 TOOL 4 FEED 2 → PASS
+- Test4 inventory wood5 stone3 → PASS
+- Test5 canCraft axe → PASS
+- Test6 craft axe → PASS wood2 stone1 axe1
+- Test7 canCraft again fails → PASS missing wood,stone
+- Test8 bread 3 wheat→1 bread → PASS
+- Test9 hay 2 wheat→2 hay → PASS
+- Test10 animal_feed 2 hay+1 wheat+1 carrot→3 feed → PASS
+- Test11 craftable list with many mats >=6 → PASS 10 found
+- Test12 save/load totalCrafted → PASS
+- Test13 coin 1 ore→10 coin → PASS
+- Test14 health_potion → PASS
+- Integration migration v16→v17 preserves animals 5 farming 2 → PASS
+- Crafting chain hay → feed animal → PASS
+- Build 75 modules 391.79kB → PASS
+- Manual tsx crafting lifecycle PASS
 
 ### Running
 
@@ -115,14 +114,22 @@ npm run dev
 # http://localhost:5173
 ```
 
-### Controls (Phase 16.1)
+### Controls (Phase 16.2)
 - **WASD/Arrows** - Move player, walk to edge road to travel between maps
-- **TAB** - Minimap, **F** farming overlay, **Shift+F** fog, **Shift+M** full map, **Shift+G** animals overlay (avoid WASD conflict)
+- **TAB** - Minimap, **F** farming overlay, **Shift+F** fog, **Shift+M** full map, **Shift+G** animals overlay, **Shift+C** crafting UI (avoid WASD conflict)
 - **E / Enter** - Interact: NPC/building (💬) highest priority, else near animal if produce ready collect (egg/milk/wool/truffle) → adds to inventory, else feed if has feed (hay/animal_feed/wheat/wheat_seed/carrot/berry/apple/carrot_seed/mushroom) consumes 1 and restores hunger+happiness, else pet → happiness up. Else farming: till farmland/grass, plant seed, water, harvest, clear withered. Prioritizes closer animal vs farm plot when both nearby, produce ready wins.
 - **R** - Water nearby farm plot
 - **I** - Inventory 33 items, WASD/Arrows navigate, Shift+S sort, C filter, M merge, Shift+O random items (includes egg/milk/wool/hay/feed/truffle)
-- **Shift+P** - Test farm plots 6, **Shift+U** - Test animals 4 (chicken,cow,sheep,pig)
-- **P** - Print all including farming nearby + animals nearby + debug, **T** - Run all tests 7-16.1
+- **Crafting UI (Shift+C)**:
+  - W/S or Up/Down navigate recipes list
+  - C filter category (ALL → TOOL → FOOD → MATERIAL → FEED → POTION → MISC)
+  - Shift+C toggle craftable only filter
+  - Enter craft selected if canCraft (consumes ingredients, adds result)
+  - ESC or Shift+C close
+  - Quick hint top-right when not open shows craftable count
+  - Recipes: axe (3 wood+2 stone), pickaxe (3 wood+3 stone+1 ore), fishing_rod (3 wood+2 fiber), sickle (2 wood+1 ore), bread (3 wheat), egg bread (2 wheat+1 egg→2 bread), hay (2 wheat→2 hay), animal_feed (2 hay+1 wheat+1 carrot→3 feed), health_potion (2 herb+1 mushroom), stamina_potion (1 herb+2 berry+1 mushroom), fiber (1 wood→2 fiber), coin (1 ore→10 coin)
+- **Shift+P** - Test farm plots 6, **Shift+U** - Test animals 4 (chicken,cow,sheep,pig), **Ctrl+Shift+C** - Debug print crafting
+- **P** - Print all including farming nearby + animals nearby + crafting debug, **T** - Run all tests 7-16.2
 - **Ctrl+S/L** quick save/load Slot0, **Ctrl+Shift+S/L** Save/Load UI, **Ctrl+N** new game, Auto-save 60s + map transition
 - **Shift+R** reveal all, **Ctrl+R** reset exploration, **Shift+[ / ]** vision, **F1/F3/F4** jump maps
 - **Space** pause, =/+ faster, -/_ slower, ] +1h, [ -1h, \ next phase, Shift+E clock
@@ -133,30 +140,32 @@ npm run dev
 
 ```
 src/
+├── crafting/
+│   ├── Recipe.ts - RecipeCategory, RecipeIngredient, RecipeDefinition, CraftingSaveData
+│   ├── RecipeDatabase.ts - 12 recipes TOOL/FOOD/MATERIAL/FEED/POTION/MISC, validation
+│   ├── CraftingSystem.ts - canCraft/craft with inventory consumption, craftable list, save/load, totals
+│   ├── CraftingRenderer.ts - UI overlay list + detail + quick hint, filters
+│   └── test_crafting.ts - manual tsx 15 checks
 ├── animals/
-│   ├── Animal.ts - enums AnimalState/AnimalType, interfaces AnimalDefinition/AnimalData/AnimalSaveData, helpers
-│   ├── AnimalDatabase.ts - 4 animals chicken/cow/sheep/pig, produce intervals, feed items, validation
-│   ├── AnimalInstance.ts - feed/pet/collectProduce/update hunger/happiness decay, produce ready, wander random walk with navGrid, save/load, debug
-│   ├── AnimalSystem.ts - createAnimal checks bounds/walkable, feedAnimal/petAnimal/collectProduce, getAnimal/getAnimalAt/getAnimalsForMap/getNearby, update, save/load, clear, debug, fillWithTestAnimals
-│   ├── AnimalRenderer.ts - renders bg per state, icon, produce gold glow + icon, hunger/happiness bars, info box
-│   ├── test_animals.ts - manual tsx 12 checks lifecycle
-│   └── README.md
+│   ├── Animal.ts - states, types, definitions, data
+│   ├── AnimalDatabase.ts - 4 animals chicken/cow/sheep/pig
+│   ├── AnimalInstance.ts - feed/pet/collect/update wander
+│   ├── AnimalSystem.ts - manager, persistence
+│   ├── AnimalRenderer.ts - icons + bars + gold glow + minimap dots
+│   └── test_animals.ts
 ├── farming/ - 4 crops, till/plant/water/harvest/wither, persistence
-├── inventory/ - ItemType 33 types adds EGG,MILK,WOOL,HAY,ANIMAL_FEED,TRUFFLE, 33 items
-├── save/ - SAVE_VERSION 16, animals totals version2, migrateToV16
-├── exploration/ - fog, vision 8, minimap
+├── inventory/ - ItemType 33 types, 33 items
+├── save/ - SAVE_VERSION 17, crafting totals, migrateToV17
+├── exploration/ - fog, vision 8, minimap with animals dots colored gold when ready
 ├── world/ - 3 maps, transitions
-├── interaction/ - range 60px
-├── dialogue/ - role trees
-├── life/ - needs, inventory, jobs
-├── time/ - TimeManager totalSeconds
-├── core/Game.ts - + animalSystem/renderer, Shift+G animals overlay, E feed/collect/pet, save/load animals, P prints animals, T runs 7-16.1, Shift+U test animals
+├── core/Game.ts - + craftingSystem/renderer, Shift+C crafting UI, save/load crafting, P prints crafting, T runs 7-16.2
 └── main.ts
 ```
 
 ### Previous Phases
+- Phase16.1: Animals 4 types, feed/pet/produce/wander, hunger/happiness decay, 5 default spawn 22,22 23,22 15,32 16,32 24,23 village, always visible after fog, minimap colored dots yellow chicken #ffeb3b brown cow #8d6e63 white sheep #e0e0e0 pink pig #f48fb1 gold #ffd700 ready
 - Phase15: Farming 4 crops, till/plant/water/harvest/wither, persistence, F overlay, E/R farming
-- Phase14: Inventory 33 items (now), stackable/non-stackable, slots, sorting, save/load, I UI
+- Phase14: Inventory 33 items, stackable/non-stackable, slots, sorting, save/load, I UI
 - Phase13: Save/Load 5 slots, validation, migration, auto-save, new game
 - Phase12: Exploration fog, minimap, 3 maps transitions
 - Phase11: Interaction & Dialogue

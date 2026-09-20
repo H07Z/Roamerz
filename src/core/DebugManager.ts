@@ -204,6 +204,47 @@ export interface SaveDebugInfo {
   showDebug: boolean;
 }
 
+export interface FarmingDebugInfo {
+  cropCount: number;
+  crops: string[];
+  plotCount: number;
+  mapPlotCount: number;
+  debug: string;
+  mapDebug: string;
+  showFarming: boolean;
+}
+
+export interface AnimalDebugInfo {
+  animalCount: number;
+  animals: string[];
+  totalCount: number;
+  mapCount: number;
+  debug: string;
+  mapDebug: string;
+  showAnimals: boolean;
+}
+
+export interface InventoryDebugInfo {
+  databaseCount: number;
+  categories: string[];
+  playerUsed: number;
+  playerCapacity: number;
+  playerValue: number;
+  playerCount: number;
+  debug: string;
+  sortMode: string;
+  showUI: boolean;
+}
+
+export interface CraftingDebugInfo {
+  recipeCount: number;
+  recipes: string[];
+  unlockedCount: number;
+  totalCrafted: number;
+  debug: string;
+  showCrafting: boolean;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -243,7 +284,11 @@ export class DebugManager {
   private explorationInfo: ExplorationDebugInfo | null = null;
   private worldInfo: WorldDebugInfo | null = null;
   private saveInfo: SaveDebugInfo | null = null;
-  private currentPhase: string = '13';
+  private farmingInfo: FarmingDebugInfo | null = null;
+  private animalInfo: AnimalDebugInfo | null = null;
+  private inventoryInfo: InventoryDebugInfo | null = null;
+  private craftingInfo: CraftingDebugInfo | null = null;
+  private currentPhase: string = '17';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -293,6 +338,10 @@ export class DebugManager {
   setExplorationInfo(info: ExplorationDebugInfo): void { this.explorationInfo = info; }
   setWorldInfo(info: WorldDebugInfo): void { this.worldInfo = info; }
   setSaveInfo(info: SaveDebugInfo): void { this.saveInfo = info; }
+  setFarmingInfo(info: FarmingDebugInfo): void { this.farmingInfo = info; }
+  setAnimalInfo(info: AnimalDebugInfo): void { this.animalInfo = info; }
+  setInventoryInfo(info: InventoryDebugInfo): void { this.inventoryInfo = info; }
+  setCraftingInfo(info: CraftingDebugInfo): void { this.craftingInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -327,12 +376,16 @@ export class DebugManager {
     const lifeHeight = this.lifeInfo ? 15 : 0;
     const interactionHeight = this.interactionInfo ? 15 : 0;
     const dialogueHeight = this.dialogueInfo ? 15 : 0;
+    const farmingHeight = this.farmingInfo ? 15 : 0;
+    const animalHeight = this.animalInfo ? 15 : 0;
+    const inventoryHeight = this.inventoryInfo ? 15 : 0;
+    const craftingHeight = this.craftingInfo ? 15 : 0;
     const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -372,6 +425,34 @@ export class DebugManager {
       const lastSaveStr = this.saveInfo.lastSave ? new Date(this.saveInfo.lastSave).toLocaleTimeString() : 'never';
       const lastLoadStr = this.saveInfo.lastLoad ? new Date(this.saveInfo.lastLoad).toLocaleTimeString() : 'never';
       ctx.fillText(`SAVE: v${this.saveInfo.version} ${this.saveInfo.gameVersion} Slots:${this.saveInfo.slotCount}/${this.saveInfo.maxSlots} Saves:${this.saveInfo.saveCount} Corrupt:${this.saveInfo.corrupted} Play:${(this.saveInfo.playTime/60).toFixed(1)}m Auto:${this.saveInfo.autoSaveIn.toFixed(0)}s LastSave:${lastSaveStr} LastLoad:${lastLoadStr} ${this.saveInfo.lastError ? `ERR:${this.saveInfo.lastError.substring(0,20)}` : ''}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.inventoryInfo) {
+      ctx.fillStyle = '#8af';
+      ctx.fillText(`INVENTORY: DB ${this.inventoryInfo.databaseCount} items ${this.inventoryInfo.categories.slice(0,3).join(',')} | Player ${this.inventoryInfo.playerUsed}/${this.inventoryInfo.playerCapacity} Val:${this.inventoryInfo.playerValue} Count:${this.inventoryInfo.playerCount} Sort:${this.inventoryInfo.sortMode} UI:${this.inventoryInfo.showUI?'OPEN':'CLOSED'} ${this.inventoryInfo.debug.substring(0,40)}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.farmingInfo) {
+      ctx.fillStyle = '#8f8';
+      ctx.fillText(`FARMING: Crops ${this.farmingInfo.cropCount} ${this.farmingInfo.crops.join(',')} | ${this.farmingInfo.debug} | Map: ${this.farmingInfo.mapDebug} Overlay:${this.farmingInfo.showFarming?'ON':'OFF'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.animalInfo) {
+      ctx.fillStyle = '#fa8';
+      ctx.fillText(`ANIMALS: Types ${this.animalInfo.animalCount} ${this.animalInfo.animals.join(',')} | ${this.animalInfo.debug} | Map: ${this.animalInfo.mapDebug} Overlay:${this.animalInfo.showAnimals?'ON':'OFF'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.craftingInfo) {
+      ctx.fillStyle = '#f8f';
+      ctx.fillText(`CRAFTING: Recipes ${this.craftingInfo.recipeCount} ${this.craftingInfo.recipes.slice(0,4).join(',')} | Unlocked:${this.craftingInfo.unlockedCount} Crafted:${this.craftingInfo.totalCrafted} | ${this.craftingInfo.debug} UI:${this.craftingInfo.showCrafting?'OPEN':'CLOSED'}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }

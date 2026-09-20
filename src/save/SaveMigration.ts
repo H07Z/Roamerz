@@ -39,6 +39,10 @@ export function migrateSaveFile(saveFile: any): SaveFile {
         migratedFile = migrateToV16(migratedFile);
         migrations.push(`Migrated to v16 (Phase 16.1 Animals System)`);
         break;
+      case 17:
+        migratedFile = migrateToV17(migratedFile);
+        migrations.push(`Migrated to v17 (Phase 16.2 Crafting System)`);
+        break;
       default:
         // Generic migration: ensure defaults for unknown future version
         migratedFile = migrateGeneric(migratedFile, nextVersion);
@@ -313,8 +317,42 @@ function migrateToV16(oldSave: any): any {
   };
 }
 
+function migrateToV17(oldSave: any): any {
+  const defaults = createDefaultSaveFile(oldSave.slotId ?? 0);
+  const oldCrafting = oldSave.world?.crafting ?? { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 };
+
+  const newCrafting = {
+    recipesUnlocked: oldCrafting.recipesUnlocked ?? [],
+    totalCrafted: oldCrafting.totalCrafted ?? 0,
+    craftedCounts: oldCrafting.craftedCounts ?? {},
+    version: 1
+  };
+
+  return {
+    ...defaults,
+    ...oldSave,
+    version: 17,
+    gameVersion: oldSave.gameVersion ?? '0.17.0',
+    player: {
+      ...defaults.player,
+      ...(oldSave.player ?? {}),
+      crafting: oldSave.player?.crafting ?? {}
+    },
+    world: {
+      ...defaults.world,
+      ...(oldSave.world ?? {}),
+      crafting: newCrafting,
+      animals: oldSave.world?.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
+      farming: oldSave.world?.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
+      time: { ...defaults.world.time, ...(oldSave.world?.time ?? {}) },
+      exploration: { ...defaults.world.exploration, ...(oldSave.world?.exploration ?? {}), maps: oldSave.world?.exploration?.maps ?? {} }
+    },
+    meta: { ...defaults.meta, ...(oldSave.meta ?? {}), saveVersion: 17, gameVersion: oldSave.gameVersion ?? '0.17.0' }
+  };
+}
+
 // For future phases:
-// function migrateToV17(saveFile: any): any { ... }
+// function migrateToV18(saveFile: any): any { ... }
 
 export function getMigrationPath(fromVersion: number, toVersion: number = SAVE_VERSION): number[] {
   const path: number[] = [];

@@ -4,8 +4,8 @@
  * Supports future: farming, animals, weather, crafting, combat, dungeons, events, relationships, etc.
  */
 
-export const SAVE_VERSION = 16; // Phase 16.1 - Animals / Livestock System
-export const SAVE_GAME_VERSION = '0.16.0';
+export const SAVE_VERSION = 17; // Phase 16.2 - Crafting System
+export const SAVE_GAME_VERSION = '0.17.0';
 export const MAX_SAVE_SLOTS = 5;
 export const STORAGE_KEY_PREFIX = 'roamerz_save_';
 export const STORAGE_META_KEY = 'roamerz_save_meta';
@@ -247,6 +247,13 @@ export interface WorldSaveData {
     totalPetted: number;
     version: number;
   };
+  // Crafting System Phase16.2
+  crafting?: {
+    recipesUnlocked: string[];
+    totalCrafted: number;
+    craftedCounts: Record<string, number>;
+    version: number;
+  };
   weather?: {
     current: string;
     intensity: number;
@@ -438,6 +445,7 @@ export function createDefaultWorldSaveData(): WorldSaveData {
     eventStates: {},
     farming: { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
     animals: { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
+    crafting: { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
     weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
     economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
     dungeons: {},
