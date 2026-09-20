@@ -41,7 +41,8 @@ export class MinimapRenderer {
     npcs: { id: string; x: number; y: number; getTilePosition: () => { x: number; y: number }; role: string }[],
     buildings: { id: string; x: number; y: number; type: any }[],
     screenWidth: number,
-    screenHeight: number
+    screenHeight: number,
+    animals?: { id: string; x: number; y: number; getTilePosition?: () => { x: number; y: number }; getX?: () => number; getY?: () => number; isProduceReady?: () => boolean; getType?: () => string }[]
   ): void {
     if (!this.showMinimap) return;
     if (!map) return;
@@ -162,6 +163,46 @@ export class MinimapRenderer {
       ctx.beginPath();
       ctx.arc(offsetX + tile.x * scale + scale/2, offsetY + tile.y * scale + scale/2, scale * 0.8, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Render animals as dots (Phase 16.1)
+    if (animals) {
+      for (const animal of animals) {
+        let tx: number, ty: number;
+        if (animal.getTilePosition) {
+          const t = animal.getTilePosition();
+          tx = t.x; ty = t.y;
+        } else if (animal.getX && animal.getY) {
+          tx = animal.getX(); ty = animal.getY();
+        } else {
+          tx = (animal as any).x; ty = (animal as any).y;
+        }
+        const idx = ty * mapWidth + tx;
+        if (idx < 0 || idx >= data.explored.length) continue;
+        if (!data.explored[idx]) continue;
+
+        let color = '#8f8';
+        const type = animal.getType ? animal.getType() : (animal as any).type;
+        switch (type) {
+          case 'chicken': color = '#ffeb3b'; break;
+          case 'cow': color = '#8d6e63'; break;
+          case 'sheep': color = '#e0e0e0'; break;
+          case 'pig': color = '#f48fb1'; break;
+          default: color = '#a5d6a7';
+        }
+        const ready = animal.isProduceReady ? animal.isProduceReady() : false;
+
+        ctx.fillStyle = ready ? '#ffd700' : color;
+        ctx.beginPath();
+        ctx.arc(offsetX + tx * scale + scale/2, offsetY + ty * scale + scale/2, ready ? scale * 1.2 : scale * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (ready) {
+          ctx.strokeStyle = '#ffd700';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
     }
 
     // Render player as white dot

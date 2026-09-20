@@ -328,6 +328,18 @@ export class Game {
         console.log(`[Game] AnimalSystem: ${this.animalSystem.getDebugString()}`);
         this.animalRenderer.setShowAnimals(this.showAnimals);
 
+        // Phase 16.1: Spawn default animals in village for visibility if none exist
+        if (this.animalSystem.getAnimalCount() === 0) {
+          const totalSec = this.timeManager.getTotalSeconds();
+          // Near farm and near village square - walkable positions
+          this.animalSystem.createAnimal(22, 22, 'village_01', 'chicken', totalSec, map, this.navigationGrid);
+          this.animalSystem.createAnimal(23, 22, 'village_01', 'chicken', totalSec, map, this.navigationGrid);
+          this.animalSystem.createAnimal(15, 32, 'village_01', 'cow', totalSec, map, this.navigationGrid);
+          this.animalSystem.createAnimal(16, 32, 'village_01', 'sheep', totalSec, map, this.navigationGrid);
+          this.animalSystem.createAnimal(24, 23, 'village_01', 'pig', totalSec, map, this.navigationGrid);
+          console.log(`[Game] Spawned default animals: ${this.animalSystem.getDebugString()}`);
+        }
+
         console.log(`[Game] Phase 15: Farming System - data-driven crops, till/plant/water/harvest/wither, time-based growth, persistence`);
         console.log(`[Game] Phase 16.1: Animals System - data-driven livestock, feed/pet/produce/wander, hunger/happiness, persistence`);
         console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
@@ -694,6 +706,14 @@ export class Game {
     this.farmingSystem.clear();
     this.animalSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
     this.animalSystem.clear();
+    // Spawn default animals for new game
+    const totalSecNew = this.timeManager.getTotalSeconds();
+    const villageMapForAnimals = this.world.getMap('village_01') ?? this.world.getCurrentMap();
+    this.animalSystem.createAnimal(22, 22, 'village_01', 'chicken', totalSecNew, villageMapForAnimals, this.navigationGrid);
+    this.animalSystem.createAnimal(23, 22, 'village_01', 'chicken', totalSecNew, villageMapForAnimals, this.navigationGrid);
+    this.animalSystem.createAnimal(15, 32, 'village_01', 'cow', totalSecNew, villageMapForAnimals, this.navigationGrid);
+    this.animalSystem.createAnimal(16, 32, 'village_01', 'sheep', totalSecNew, villageMapForAnimals, this.navigationGrid);
+    this.animalSystem.createAnimal(24, 23, 'village_01', 'pig', totalSecNew, villageMapForAnimals, this.navigationGrid);
 
     this.worldFlags = {};
     this.openedLocations = new Set(['village_01']);
@@ -2734,18 +2754,18 @@ export class Game {
         }
       }
 
-      // Farming plots render (before fog, after buildings)
+      // Farming plots render (before fog, after buildings) - keep before fog for now, but animals after fog for visibility
       if (this.showFarming && this.farmingSystem) {
         this.farmingRenderer.render(ctx, this.farmingSystem, this.worldRenderer, this.camera, map.mapId, w, h);
       }
 
-      // Animals render (before fog, after farming)
-      if (this.showAnimals && this.animalSystem) {
-        this.animalRenderer.render(ctx, this.animalSystem, this.worldRenderer, this.camera, map.mapId, w, h);
-      }
-
       if (this.showFog && this.explorationSystem) {
         this.explorationRenderer.renderFog(ctx, this.worldRenderer, this.camera, this.explorationSystem, map.mapId, w, h);
+      }
+
+      // Animals render AFTER fog so they are always visible even in unexplored (livestock should be seen)
+      if (this.showAnimals && this.animalSystem) {
+        this.animalRenderer.render(ctx, this.animalSystem, this.worldRenderer, this.camera, map.mapId, w, h);
       }
     } else {
       this.renderer.renderBackground();
@@ -2783,7 +2803,7 @@ export class Game {
     }
 
     if (this.showMinimap && map) {
-      this.minimapRenderer.render(ctx, map, this.explorationSystem, this.player, this.npcManager.getAllNPCs(), this.buildingManager.getAllBuildings(), w, h);
+      this.minimapRenderer.render(ctx, map, this.explorationSystem, this.player, this.npcManager.getAllNPCs(), this.buildingManager.getAllBuildings(), w, h, this.animalSystem.getAllAnimals() as any);
     }
 
     if (this.showFullMap && map) {
