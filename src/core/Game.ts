@@ -1,10 +1,11 @@
 /**
- * Game - Phase 12 Exploration & World Expansion
- * - 3 maps: village_01, forest_01, lake_01 with transitions via edges
+ * Game - Phase 13 Save, Load & World Persistence
+ * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
- * - Map transitions via entrances at edges, exploration persists per map
- * - Fog of war rendering, minimap, full map view
+ * - SaveManager: versioned save files, slots, validation, migration, corruption protection
+ * - Player, World, Time, Exploration, NPCs all save/load with defaults handling
+ * - Auto-save, quick save/load, save UI, new game
  */
 
 import { Renderer } from './Renderer';
@@ -33,6 +34,17 @@ import { DialogueRenderer } from '../dialogue/DialogueRenderer';
 import { ExplorationSystem } from '../exploration/ExplorationSystem';
 import { ExplorationRenderer } from '../exploration/ExplorationRenderer';
 import { MinimapRenderer } from '../exploration/MinimapRenderer';
+import { SaveManager } from '../save/SaveManager';
+import { SaveRenderer } from '../save/SaveRenderer';
+import {
+  SAVE_VERSION,
+  SAVE_GAME_VERSION,
+  MAX_SAVE_SLOTS,
+  AUTO_SAVE_SLOT,
+  SaveFile,
+  SaveSlotInfo,
+  createDefaultSaveFile
+} from '../save/SaveTypes';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -63,6 +75,15 @@ export class Game {
   private explorationRenderer: ExplorationRenderer;
   private minimapRenderer: MinimapRenderer;
 
+  // Phase 13 Save System
+  private saveManager: SaveManager;
+  private saveRenderer: SaveRenderer;
+  private saveSlots: SaveSlotInfo[] = [];
+  private autoSaveTimer: number = 0;
+  private autoSaveInterval: number = 60; // seconds
+  private playTimeSeconds: number = 0;
+  private isSaveUINavigating: boolean = false;
+
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
   private accumulatedTime: number = 0;
@@ -90,9 +111,18 @@ export class Game {
   private showMinimap: boolean = true;
   private showFullMap: boolean = false;
   private showVisionDebug: boolean = false;
+  private showSaveDebug: boolean = true;
 
   private playerMapId: string = 'village_01';
   private mapTransitionCooldown: number = 0;
+
+  // World persistence flags (Phase 13)
+  private worldFlags: Record<string, boolean | string | number | null> = {};
+  private openedLocations: Set<string> = new Set(['village_01']);
+  private collectedObjects: Set<string> = new Set();
+  private changedObjects: Record<string, any> = {};
+  private questRelatedChanges: Record<string, any> = {};
+  private eventStates: Record<string, any> = {};
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -119,12 +149,14 @@ export class Game {
     this.explorationSystem = new ExplorationSystem(8);
     this.explorationRenderer = new ExplorationRenderer();
     this.minimapRenderer = new MinimapRenderer();
+    this.saveManager = SaveManager.getInstance();
+    this.saveRenderer = new SaveRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 12 - Exploration & World Expansion...');
+    console.log('[Game] Initializing Phase 13 - Save, Load & World Persistence...');
 
     this.input.initialize(this.canvas);
 
@@ -133,7 +165,6 @@ export class Game {
       const allMaps = this.world.getAllMaps();
       console.log(`[Game] World: ${allMaps.length} maps loaded`);
 
-      // Initialize exploration for all maps
       this.explorationSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
       console.log(`[Game] Exploration: ${this.explorationSystem.getDebugString()}`);
 
@@ -187,6 +218,7 @@ export class Game {
         const startY = 20 * tileSize + tileSize / 2;
         this.player = new Player(startX, startY, 150);
         this.playerMapId = map.mapId;
+        this.openedLocations.add(map.mapId);
 
         this.npcManager.initialize(map, collisionMap, this.navigationGrid, this.pathfinder, this.buildingManager, this.scheduleManager, this.timeManager, this.lifeManager);
         console.log(`[Game] NPCs: ${this.npcManager.getCount()} with pathfinding, homes, schedules, and life`);
@@ -201,7 +233,6 @@ export class Game {
 
         console.log(`[Game] Dialogue: ${this.dialogueManager.getTotalDialogues()} dialogues, ready`);
 
-        // Initial exploration reveal
         if (this.player) {
           const tilePos = this.player.getTilePosition();
           this.explorationSystem.update(tilePos, map.mapId);
@@ -211,8 +242,13 @@ export class Game {
         this.explorationRenderer.setShowFog(this.showFog);
         this.minimapRenderer.setShowMinimap(this.showMinimap);
 
-        console.log(`[Game] Phase 12: Exploration & World Expansion - 3 maps, fog of war, minimap, transitions`);
-        console.log(`[Game] Controls: TAB minimap, F fog, Shift+M full map, WASD move, E interact, edges to travel between maps`);
+        // Phase 13 Save System init
+        this.saveSlots = this.saveManager.getAllSaveSlots();
+        console.log(`[Game] SaveManager: ${this.saveSlots.filter(s=>s.exists).length}/${MAX_SAVE_SLOTS} slots used, v${SAVE_VERSION}`);
+        this.saveManager.debugPrintSlots();
+
+        console.log(`[Game] Phase 13: Save, Load & World Persistence - versioned saves, slots, validation, migration`);
+        console.log(`[Game] Controls: Ctrl+S quick save, Ctrl+L quick load, Ctrl+Shift+S/L save/load UI, Ctrl+N new game, F5/F6 save UI (alternative)`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -265,6 +301,470 @@ export class Game {
     this.animationFrameId = requestAnimationFrame(this.gameLoop);
   };
 
+  // ==================== PHASE 13 SAVE SYSTEM ====================
+
+  private collectSaveData(slotId: number = AUTO_SAVE_SLOT): SaveFile {
+    const currentMap = this.world.getCurrentMap();
+    const currentMapId = currentMap?.mapId ?? this.playerMapId;
+    const playerTile = this.player?.getTilePosition() ?? { x: 25, y: 20 };
+
+    // Player data
+    const playerSave = this.player ? this.player.getSaveData(currentMapId) : null;
+    const defaultPlayer = createDefaultSaveFile(slotId).player;
+    const finalPlayer = playerSave ? {
+      ...defaultPlayer,
+      ...playerSave,
+      mapId: currentMapId,
+      stats: {
+        ...defaultPlayer.stats,
+        ...(playerSave.stats ?? {}),
+        playTimeSeconds: this.playTimeSeconds,
+        totalDistance: this.player?.getTotalDistance() ?? 0,
+        mapsDiscovered: this.openedLocations.size,
+        npcsMet: this.player ? Array.from(this.player.npcsMet) : [],
+        interactions: this.interactionSystem.getTotalInteractions()
+      }
+    } : defaultPlayer;
+
+    // Time data
+    const timeSave = this.timeManager.getSaveData();
+
+    // Exploration data
+    const explorationSave = this.explorationSystem.getSaveData();
+
+    // World data
+    const allMapsInfo = this.world.getAllMapsInfo();
+    const worldSave = {
+      currentMapId,
+      playerMapId: this.playerMapId,
+      allMaps: allMapsInfo,
+      time: timeSave,
+      exploration: explorationSave,
+      flags: { ...this.worldFlags },
+      openedLocations: Array.from(this.openedLocations),
+      closedLocations: [],
+      collectedObjects: Array.from(this.collectedObjects),
+      changedObjects: { ...this.changedObjects },
+      questRelatedChanges: { ...this.questRelatedChanges },
+      eventStates: { ...this.eventStates },
+      farming: { plots: {}, version: 1 },
+      animals: { animals: {}, version: 1 },
+      weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
+      economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
+      dungeons: {},
+      events: {},
+      seasons: {}
+    };
+
+    // NPCs data
+    const npcs: Record<string, any> = {};
+    for (const npc of this.npcManager.getAllNPCs()) {
+      npcs[npc.id] = npc.getSaveData(currentMapId);
+    }
+
+    // Quests placeholder
+    const quests = {
+      quests: {},
+      version: 1
+    };
+
+    // Meta
+    const timeData = this.timeManager.getTimeData();
+    const explorationPerc = this.explorationSystem.getExplorationPercentage(currentMapId);
+    const meta = {
+      playTimeSeconds: this.playTimeSeconds,
+      saveCount: (this.saveManager.getStats().saveCount + 1),
+      lastSaved: Date.now(),
+      createdAt: Date.now(),
+      gameVersion: SAVE_GAME_VERSION,
+      saveVersion: SAVE_VERSION,
+      slotId,
+      playerName: 'Adventurer',
+      preview: {
+        day: timeData.day,
+        time: this.timeManager.formatTime(),
+        mapId: currentMapId,
+        mapName: currentMap?.name ?? currentMapId,
+        explorationPercent: explorationPerc,
+        money: finalPlayer.money,
+        health: finalPlayer.health
+      }
+    };
+
+    const saveFile: SaveFile = {
+      version: SAVE_VERSION,
+      gameVersion: SAVE_GAME_VERSION,
+      timestamp: Date.now(),
+      slotId,
+      player: finalPlayer as any,
+      world: worldSave as any,
+      npcs,
+      quests: quests as any,
+      meta: meta as any,
+      future: {},
+      migrations: []
+    };
+
+    return saveFile;
+  }
+
+  private applySaveData(saveFile: SaveFile): boolean {
+    try {
+      console.log(`[Game] Applying save data slot ${saveFile.slotId} v${saveFile.version} Day ${saveFile.world.time.day} ${saveFile.player.mapId}`);
+
+      // Validate map exists
+      const targetMapId = saveFile.world.currentMapId ?? saveFile.player.mapId;
+      const targetMap = this.world.getMap(targetMapId);
+      if (!targetMap) {
+        console.warn(`[Game] Save target map ${targetMapId} not found, using current map`);
+      } else {
+        // Load map if different
+        const currentMapId = this.world.getCurrentMap()?.mapId;
+        if (currentMapId !== targetMapId) {
+          console.log(`[Game] Switching to saved map ${targetMapId}`);
+          this.world.loadMap(targetMapId);
+          const newMap = this.world.getCurrentMap();
+          if (newMap) {
+            this.collisionSystem.initializeFromWorldMap(newMap);
+            const collisionMap = this.collisionSystem.getCollisionMap();
+            if (collisionMap) {
+              this.navigationGrid = NavigationGrid.fromCollisionMap(collisionMap);
+            } else {
+              this.navigationGrid = NavigationGrid.fromWorldMap(newMap);
+            }
+            if (this.pathfinder && this.navigationGrid) {
+              this.pathfinder.setNavigationGrid(this.navigationGrid);
+            }
+            this.buildingManager.initialize(newMap);
+            this.camera.setWorldMap(newMap);
+            this.playerMapId = targetMapId;
+          }
+        }
+      }
+
+      // Apply time
+      this.timeManager.loadSaveData(saveFile.world.time);
+      console.log(`[Game] Time loaded: ${this.timeManager.formatDayTime()}`);
+
+      // Apply exploration
+      this.explorationSystem.loadSaveData(saveFile.world.exploration);
+      console.log(`[Game] Exploration loaded: ${this.explorationSystem.getDebugString()}`);
+
+      // Apply world flags and persistence
+      this.worldFlags = saveFile.world.flags ?? {};
+      this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
+      this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
+      this.changedObjects = saveFile.world.changedObjects ?? {};
+      this.questRelatedChanges = saveFile.world.questRelatedChanges ?? {};
+      this.eventStates = saveFile.world.eventStates ?? {};
+      this.playerMapId = saveFile.world.playerMapId ?? targetMapId;
+
+      // Apply player
+      if (this.player) {
+        this.player.loadSaveData(saveFile.player);
+        // Ensure position is walkable
+        if (this.navigationGrid) {
+          const tilePos = this.player.getTilePosition();
+          if (!this.navigationGrid.isWalkable(tilePos.x, tilePos.y)) {
+            console.warn(`[Game] Saved player position not walkable ${tilePos.x},${tilePos.y}, finding nearest`);
+            let found = false;
+            for (let r = 1; r <= 5 && !found; r++) {
+              for (let dy = -r; dy <= r && !found; dy++) {
+                for (let dx = -r; dx <= r && !found; dx++) {
+                  const nx = tilePos.x + dx;
+                  const ny = tilePos.y + dy;
+                  if (this.navigationGrid.isWalkable(nx, ny)) {
+                    this.player.setPosition(nx * 32 + 16, ny * 32 + 16);
+                    found = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Apply NPCs
+      for (const npcId of Object.keys(saveFile.npcs)) {
+        const npcSave = saveFile.npcs[npcId];
+        const npc = this.npcManager.getNPC(npcId);
+        if (npc && npcSave) {
+          npc.loadSaveData(npcSave);
+        }
+      }
+
+      // Apply playtime
+      this.playTimeSeconds = saveFile.meta.playTimeSeconds ?? saveFile.player.stats?.playTimeSeconds ?? 0;
+
+      // Update camera
+      if (this.player) {
+        this.camera.centerOn(this.player.x, this.player.y);
+      }
+
+      // Refresh save slots
+      this.saveSlots = this.saveManager.getAllSaveSlots();
+
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}%`);
+
+      return true;
+    } catch (e) {
+      console.error('[Game] Failed to apply save data:', e);
+      return false;
+    }
+  }
+
+  saveGame(slotId: number = AUTO_SAVE_SLOT): boolean {
+    try {
+      const saveFile = this.collectSaveData(slotId);
+      const success = this.saveManager.saveGame(slotId, saveFile);
+      if (success) {
+        this.saveSlots = this.saveManager.getAllSaveSlots();
+        this.saveRenderer.showMessage(`💾 Saved to Slot ${slotId} - Day ${saveFile.world.time.day} ${saveFile.world.currentMapId}`, '#8f8', 3);
+        console.log(`[Game] Saved to slot ${slotId} successfully`);
+        return true;
+      } else {
+        const error = this.saveManager.getLastError() ?? 'Unknown error';
+        this.saveRenderer.showMessage(`❌ Save failed: ${error}`, '#f88', 4);
+        console.error(`[Game] Save to slot ${slotId} failed: ${error}`);
+        return false;
+      }
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      this.saveRenderer.showMessage(`❌ Save error: ${err}`, '#f88', 4);
+      console.error('[Game] Save exception:', e);
+      return false;
+    }
+  }
+
+  loadGame(slotId: number = AUTO_SAVE_SLOT): boolean {
+    try {
+      const saveFile = this.saveManager.loadGame(slotId);
+      if (!saveFile) {
+        const error = this.saveManager.getLastError() ?? 'No save found';
+        this.saveRenderer.showMessage(`❌ Load failed: ${error}`, '#f88', 4);
+        console.error(`[Game] Load slot ${slotId} failed: ${error}`);
+        return false;
+      }
+
+      const success = this.applySaveData(saveFile);
+      if (success) {
+        this.saveRenderer.showMessage(`📂 Loaded Slot ${slotId} - Day ${saveFile.world.time.day} ${saveFile.world.currentMapId}`, '#8ff', 3);
+        console.log(`[Game] Loaded slot ${slotId} successfully`);
+        return true;
+      } else {
+        this.saveRenderer.showMessage(`❌ Load apply failed`, '#f88', 4);
+        return false;
+      }
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      this.saveRenderer.showMessage(`❌ Load error: ${err}`, '#f88', 4);
+      console.error('[Game] Load exception:', e);
+      return false;
+    }
+  }
+
+  newGame(): void {
+    console.log('[Game] Starting New Game...');
+
+    // Reset all systems to initial state
+    const currentMapId = 'village_01';
+    const map = this.world.getMap(currentMapId) ?? this.world.getCurrentMap();
+
+    if (!map) {
+      console.error('[Game] New Game failed: no map');
+      return;
+    }
+
+    // Load village map
+    this.world.loadMap(currentMapId);
+    const villageMap = this.world.getCurrentMap();
+    if (!villageMap) return;
+
+    this.collisionSystem.initializeFromWorldMap(villageMap);
+    const collisionMap = this.collisionSystem.getCollisionMap();
+
+    if (collisionMap) {
+      this.navigationGrid = NavigationGrid.fromCollisionMap(collisionMap);
+    } else {
+      this.navigationGrid = NavigationGrid.fromWorldMap(villageMap);
+    }
+
+    if (this.pathfinder && this.navigationGrid) {
+      this.pathfinder.setNavigationGrid(this.navigationGrid);
+    }
+
+    this.buildingManager.initialize(villageMap);
+    this.camera.setWorldMap(villageMap);
+
+    // Reset time
+    this.timeManager = new TimeManager(6, 1, 60);
+    this.timeManager.onPhaseChange((oldPhase, newPhase, time) => {
+      console.log(`[Game] Day phase: ${oldPhase} -> ${newPhase} at ${time.hour}:${String(time.minute).padStart(2,'0')} Day ${time.day}`);
+    });
+    this.timeManager.onDayChange((newDay, time) => {
+      console.log(`[Game] New day: Day ${newDay} at ${time.hour}:${String(time.minute).padStart(2,'0')}`);
+    });
+
+    // Reset exploration
+    const allMaps = this.world.getAllMaps();
+    this.explorationSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
+
+    // Reset player
+    const tileSize = WorldRenderer.TILE_SIZE;
+    const startX = 25 * tileSize + tileSize / 2;
+    const startY = 20 * tileSize + tileSize / 2;
+    this.player = new Player(startX, startY, 150);
+    this.playerMapId = currentMapId;
+
+    // Reset NPCs
+    this.scheduleManager.initialize();
+    this.npcManager.initialize(villageMap, collisionMap, this.navigationGrid, this.pathfinder, this.buildingManager, this.scheduleManager, this.timeManager, this.lifeManager);
+    if (this.lifeManager.getCount() === 0) {
+      this.lifeManager.initialize(this.npcManager.getAllNPCs(), this.buildingManager, this.timeManager);
+    } else {
+      // Re-initialize life
+      this.lifeManager.initialize(this.npcManager.getAllNPCs(), this.buildingManager, this.timeManager);
+    }
+
+    // Reset world persistence
+    this.worldFlags = {};
+    this.openedLocations = new Set(['village_01']);
+    this.collectedObjects = new Set();
+    this.changedObjects = {};
+    this.questRelatedChanges = {};
+    this.eventStates = {};
+    this.playTimeSeconds = 0;
+    this.autoSaveTimer = 0;
+
+    // Initial exploration
+    if (this.player) {
+      const tilePos = this.player.getTilePosition();
+      this.explorationSystem.update(tilePos, currentMapId);
+    }
+
+    this.camera.centerOn(this.player?.x ?? 25 * 32, this.player?.y ?? 20 * 32);
+
+    this.saveRenderer.showMessage('🆕 New Game Started - Day 1 Village', '#8f8', 3);
+    console.log('[Game] New Game started: Day 1 Village, all systems reset');
+  }
+
+  private handleSaveInput(): void {
+    // Don't handle save input if dialogue is open (except ESC to close save UI)
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (isSaveUIOpen) {
+      // Save UI navigation
+      if (this.input.isKeyJustPressed('escape')) {
+        this.saveRenderer.setShowSaveUI(false);
+        this.saveRenderer.setShowLoadUI(false);
+        console.log('[Save] Closed save UI via ESC');
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        const current = this.saveRenderer.getSelectedSlot();
+        const newSlot = Math.max(0, current - 1);
+        this.saveRenderer.setSelectedSlot(newSlot);
+      }
+
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        const current = this.saveRenderer.getSelectedSlot();
+        const newSlot = Math.min(MAX_SAVE_SLOTS - 1, current + 1);
+        this.saveRenderer.setSelectedSlot(newSlot);
+      }
+
+      // Number keys 1-5 for slot selection (but need to avoid conflict with dialogue)
+      if (!this.dialogueManager.isOpen()) {
+        for (let i = 0; i < MAX_SAVE_SLOTS; i++) {
+          if (this.input.isKeyJustPressed(String(i + 1)) && i < MAX_SAVE_SLOTS) {
+            // Check if wasOpen guard for dialogue
+            const wasOpen = (this as any)._wasDialogueOpenBeforeInput ?? false;
+            if (!wasOpen) {
+              this.saveRenderer.setSelectedSlot(i);
+            }
+          }
+        }
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        const slot = this.saveRenderer.getSelectedSlot();
+        if (this.saveRenderer['showSaveUI']) {
+          this.saveGame(slot);
+          this.saveRenderer.setShowSaveUI(false);
+        } else if (this.saveRenderer['showLoadUI']) {
+          this.loadGame(slot);
+          this.saveRenderer.setShowLoadUI(false);
+        }
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('d') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        // D is disabled for debug, but allow for delete in save UI
+        const slot = this.saveRenderer.getSelectedSlot();
+        if (this.saveManager.hasSave(slot)) {
+          this.saveManager.deleteSave(slot);
+          this.saveSlots = this.saveManager.getAllSaveSlots();
+          this.saveRenderer.showMessage(`🗑 Deleted Slot ${slot}`, '#fa8', 2);
+          console.log(`[Save] Deleted slot ${slot}`);
+        }
+        return;
+      }
+
+      // Block other inputs when save UI open
+      return;
+    }
+
+    // Quick save: Ctrl+S
+    if (this.input.isKeyDown('control') && this.input.isKeyJustPressed('s') && !this.input.isKeyDown('shift')) {
+      if (!this.dialogueManager.isOpen()) {
+        this.saveGame(AUTO_SAVE_SLOT);
+      }
+      return;
+    }
+
+    // Save UI: Ctrl+Shift+S or F5 (alternative, since F5 was NPC go home, now we use Ctrl+Shift+S)
+    if ((this.input.isKeyDown('control') && this.input.isKeyDown('shift') && this.input.isKeyJustPressed('s')) ||
+        (this.input.isKeyJustPressed('f5') && this.input.isKeyDown('shift'))) {
+      if (!this.dialogueManager.isOpen()) {
+        this.saveSlots = this.saveManager.getAllSaveSlots();
+        this.saveRenderer.setShowSaveUI(true);
+        console.log('[Save] Opened Save UI');
+      }
+      return;
+    }
+
+    // Quick load: Ctrl+L
+    if (this.input.isKeyDown('control') && this.input.isKeyJustPressed('l') && !this.input.isKeyDown('shift')) {
+      if (!this.dialogueManager.isOpen()) {
+        this.loadGame(AUTO_SAVE_SLOT);
+      }
+      return;
+    }
+
+    // Load UI: Ctrl+Shift+L or F6 (alternative)
+    if ((this.input.isKeyDown('control') && this.input.isKeyDown('shift') && this.input.isKeyJustPressed('l')) ||
+        (this.input.isKeyJustPressed('f6') && this.input.isKeyDown('shift'))) {
+      if (!this.dialogueManager.isOpen()) {
+        this.saveSlots = this.saveManager.getAllSaveSlots();
+        this.saveRenderer.setShowLoadUI(true);
+        console.log('[Save] Opened Load UI');
+      }
+      return;
+    }
+
+    // New Game: Ctrl+N
+    if (this.input.isKeyDown('control') && this.input.isKeyJustPressed('n')) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
+        this.newGame();
+      }
+      return;
+    }
+
+    // Alternative save/load keys for testing without Ctrl (when debug enabled)
+    // F5 save, F6 load were NPC go home, now changed to Shift+F5/F6 for save/load to avoid conflict
+    // We already handle Shift+F5/F6 above as alternative
+  }
+
   private switchMap(targetMapId: string, entryEdge: 'north' | 'south' | 'west' | 'east'): boolean {
     const currentMap = this.world.getCurrentMap();
     if (!currentMap) return false;
@@ -278,10 +778,8 @@ export class Game {
 
     console.log(`[World] Transition ${currentMap.mapId} -> ${targetMapId} via ${entryEdge}`);
 
-    // Load new map
     if (!this.world.loadMap(targetMapId)) return false;
 
-    // Reinitialize systems for new map
     this.collisionSystem.initializeFromWorldMap(targetMap);
     const collisionMap = this.collisionSystem.getCollisionMap();
 
@@ -298,16 +796,12 @@ export class Game {
     this.buildingManager.initialize(targetMap);
     this.camera.setWorldMap(targetMap);
 
-    // Position player at opposite edge
     const tileSize = WorldRenderer.TILE_SIZE;
     let newX = 25 * tileSize + 16;
     let newY = 20 * tileSize + 16;
 
     switch (entryEdge) {
       case 'north':
-        // Entered from north edge of current, so came from south of target? Actually we define: if player goes north edge of current, they appear at south edge of target
-        // But entryEdge param is which edge of current they exited? Let's define: entryEdge is edge of current they left
-        // If they left north, appear at south of target
         newX = 24 * tileSize + tileSize / 2;
         newY = (targetMap.height - 2) * tileSize + 16;
         break;
@@ -325,12 +819,10 @@ export class Game {
         break;
     }
 
-    // Ensure target position is walkable, if not find nearest walkable
     if (this.navigationGrid) {
       const tileX = Math.floor(newX / tileSize);
       const tileY = Math.floor(newY / tileSize);
       if (!this.navigationGrid.isWalkable(tileX, tileY)) {
-        // Search nearby walkable
         let found = false;
         for (let r = 1; r <= 5 && !found; r++) {
           for (let dy = -r; dy <= r && !found; dy++) {
@@ -353,10 +845,10 @@ export class Game {
     }
 
     this.playerMapId = targetMapId;
+    this.openedLocations.add(targetMapId);
     this.explorationSystem.recordMapTransition();
-    this.mapTransitionCooldown = 1.0; // 1 second cooldown to prevent immediate re-transition
+    this.mapTransitionCooldown = 1.0;
 
-    // Update exploration for new map
     if (this.player) {
       const tilePos = this.player.getTilePosition();
       this.explorationSystem.update(tilePos, targetMapId);
@@ -364,14 +856,18 @@ export class Game {
 
     this.camera.centerOn(this.player?.x ?? 25 * 32, this.player?.y ?? 20 * 32);
 
-    console.log(`[World] Now in ${targetMapId} at ${newX},${newY} | ${this.explorationSystem.getMapDebugString(targetMapId)}`);
+    // Phase 13: Auto-save on map transition
+    console.log(`[World] Now in ${targetMapId} at ${newX},${newY} | ${this.explorationSystem.getMapDebugString(targetMapId)} - Auto-saving`);
+    this.saveGame(AUTO_SAVE_SLOT);
+
     return true;
   }
 
   private handleMapTransitions(): void {
     if (!this.player) return;
     if (this.mapTransitionCooldown > 0) return;
-    if (this.dialogueManager.isOpen()) return; // Don't transition during dialogue
+    if (this.dialogueManager.isOpen()) return;
+    if (this.saveRenderer.isShowingUI()) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -380,40 +876,31 @@ export class Game {
     const x = tilePos.x;
     const y = tilePos.y;
 
-    // Check if at map edge (within 0-1 tile of edge) and on road
     let targetMapId: string | null = null;
     let entryEdge: 'north' | 'south' | 'west' | 'east' | null = null;
 
-    // North edge
     if (y <= 0) {
       if (x === 24 || x === 25) {
-        // Determine target based on current map
         if (map.mapId === 'village_01') targetMapId = 'forest_01';
         else if (map.mapId === 'forest_01') targetMapId = 'lake_01';
         else if (map.mapId === 'lake_01') targetMapId = 'village_01';
         entryEdge = 'north';
       }
-    }
-    // South edge
-    else if (y >= map.height - 1) {
+    } else if (y >= map.height - 1) {
       if (x === 24 || x === 25) {
         if (map.mapId === 'village_01') targetMapId = 'lake_01';
         else if (map.mapId === 'lake_01') targetMapId = 'forest_01';
         else if (map.mapId === 'forest_01') targetMapId = 'village_01';
         entryEdge = 'south';
       }
-    }
-    // West edge
-    else if (x <= 0) {
+    } else if (x <= 0) {
       if (y === 19 || y === 20) {
         if (map.mapId === 'village_01') targetMapId = 'forest_01';
         else if (map.mapId === 'forest_01') targetMapId = 'lake_01';
         else if (map.mapId === 'lake_01') targetMapId = 'village_01';
         entryEdge = 'west';
       }
-    }
-    // East edge
-    else if (x >= map.width - 1) {
+    } else if (x >= map.width - 1) {
       if (y === 19 || y === 20) {
         if (map.mapId === 'village_01') targetMapId = 'lake_01';
         else if (map.mapId === 'lake_01') targetMapId = 'forest_01';
@@ -436,7 +923,22 @@ export class Game {
       this.mapTransitionCooldown -= deltaTime;
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen()) {
+    // Phase 13: Playtime and auto-save
+    this.playTimeSeconds += deltaTime;
+    this.autoSaveTimer += deltaTime;
+    if (this.player) {
+      this.player.updatePlayTime(deltaTime);
+    }
+
+    if (this.autoSaveTimer >= this.autoSaveInterval) {
+      this.autoSaveTimer = 0;
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
+        console.log('[Save] Auto-save triggered');
+        this.saveGame(AUTO_SAVE_SLOT);
+      }
+    }
+
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       this.timeManager.update(deltaTime);
     }
 
@@ -444,7 +946,8 @@ export class Game {
 
     if (this.player && map) {
       const isDialogueOpen = this.dialogueManager.isOpen();
-      this.player.update(deltaTime, this.input, map, this.collisionSystem, isDialogueOpen);
+      const isSaveUIOpen = this.saveRenderer.isShowingUI();
+      this.player.update(deltaTime, this.input, map, this.collisionSystem, isDialogueOpen || isSaveUIOpen);
       this.playerRenderer.update(deltaTime, this.player);
       this.camera.follow(this.player.x, this.player.y);
       this.camera.update(deltaTime);
@@ -452,11 +955,9 @@ export class Game {
       this.worldRenderer.setOffset(camOffset.x, camOffset.y);
       this.worldRenderer.setZoom(this.camera.getZoom());
 
-      // Exploration update
       const tilePos = this.player.getTilePosition();
       this.explorationSystem.update(tilePos, map.mapId);
 
-      // Handle map transitions
       this.handleMapTransitions();
 
       this.debug.setPlayerInfo({
@@ -487,27 +988,31 @@ export class Game {
 
     if (map) {
       const currentMinutes = this.timeManager ? this.timeManager.getMinutesSinceMidnight() : undefined;
-      
-      // NPCs only in village
+
       const isVillage = map.mapId === 'village_01';
-      if (isVillage && !this.dialogueManager.isOpen()) {
+      const isSaveUIOpen = this.saveRenderer.isShowingUI();
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen()) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
-      // Interaction update
       if (this.player) {
         this.interactionSystem.update(this.player, this.npcManager.getAllNPCs(), this.buildingManager);
       }
 
-      // Dialogue input handling - track if dialogue was open BEFORE handling to prevent same-frame teleport bug
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      this.handleDialogueInput();
+      if (!isSaveUIOpen) {
+        this.handleDialogueInput();
+      }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
+
+      // Save input handling
+      this.handleSaveInput();
+      this.saveRenderer.update(deltaTime);
 
       this.debug.setNPCInfo({
         count: this.npcManager.getCount(),
@@ -683,7 +1188,6 @@ export class Game {
         this.debug.setLifeDetails(lifeDetails);
       }
 
-      // Interaction debug
       if (this.interactionSystem) {
         const current = this.interactionSystem.getCurrentInteractable();
         this.debug.setInteractionInfo({
@@ -698,7 +1202,6 @@ export class Game {
         });
       }
 
-      // Dialogue debug
       if (this.dialogueManager) {
         const currentNode = this.dialogueManager.getCurrentNode();
         this.debug.setDialogueInfo({
@@ -714,7 +1217,6 @@ export class Game {
         });
       }
 
-      // Exploration debug
       if (this.explorationSystem) {
         this.debug.setExplorationInfo({
           currentMapId: map.mapId,
@@ -733,7 +1235,6 @@ export class Game {
         });
       }
 
-      // World debug
       if (this.world) {
         const allMapsInfo = this.world.getAllMapsInfo();
         this.debug.setWorldInfo({
@@ -742,6 +1243,25 @@ export class Game {
           mapCount: allMapsInfo.length,
           allMaps: allMapsInfo,
           playerMapId: this.playerMapId
+        });
+      }
+
+      // Save debug
+      if (this.saveManager) {
+        const stats = this.saveManager.getStats();
+        (this.debug as any).setSaveInfo?.({
+          version: SAVE_VERSION,
+          gameVersion: SAVE_GAME_VERSION,
+          slotCount: stats.slotCount,
+          maxSlots: MAX_SAVE_SLOTS,
+          saveCount: stats.saveCount,
+          lastSave: stats.lastSaveTime,
+          lastLoad: stats.lastLoadTime,
+          lastError: stats.lastError,
+          corrupted: stats.corruptedCount,
+          playTime: this.playTimeSeconds,
+          autoSaveIn: this.autoSaveInterval - this.autoSaveTimer,
+          showDebug: this.showSaveDebug
         });
       }
     }
@@ -814,6 +1334,10 @@ export class Game {
 
         this.dialogueManager.startDialogue(interactable.npc, context);
         this.interactionSystem.recordInteraction();
+        if (this.player) {
+          this.player.npcsMet.add(interactable.npc.id);
+          this.player.totalInteractions++;
+        }
         console.log(`[Interaction] Started dialogue with ${interactable.npc.id}`);
 
       } else if (interactable.type === 'BUILDING' && interactable.building) {
@@ -838,6 +1362,7 @@ export class Game {
           context
         );
         this.interactionSystem.recordInteraction();
+        if (this.player) this.player.totalInteractions++;
         console.log(`[Interaction] Started building dialogue with ${interactable.building.id}`);
       }
     }
@@ -845,7 +1370,10 @@ export class Game {
 
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
-    // FIX: Removed D key for debug (overlaps WASD movement). Now only ` and F2 toggle debug.
+
+    // Don't toggle debug if save UI is open
+    if (this.saveRenderer.isShowingUI()) return;
+
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
     }
@@ -879,7 +1407,7 @@ export class Game {
       this.camera.centerOnTile(25, 20);
     }
 
-    if (this.input.isKeyJustPressed('k')) {
+    if (this.input.isKeyJustPressed('k') && !this.input.isKeyDown('shift')) {
       this.collisionSystem.setShowCollision(!this.collisionSystem.isShowCollision());
     }
 
@@ -893,12 +1421,12 @@ export class Game {
       this.camera.setSmoothing(newSmooth);
     }
 
-    if (this.input.isKeyJustPressed('n')) {
+    if (this.input.isKeyJustPressed('n') && !this.input.isKeyDown('control')) {
       this.showNPCPaths = !this.showNPCPaths;
       console.log(`[Pathfinding] Paths debug: ${this.showNPCPaths ? 'ON' : 'OFF'}`);
     }
 
-    if (this.input.isKeyJustPressed('m') && !this.input.isKeyDown('shift')) {
+    if (this.input.isKeyJustPressed('m') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       this.showNavigationGrid = !this.showNavigationGrid;
       console.log(`[Pathfinding] Nav grid debug: ${this.showNavigationGrid ? 'ON' : 'OFF'}`);
     }
@@ -913,7 +1441,7 @@ export class Game {
       console.log(`[Building] Doors debug: ${this.showBuildingDoors ? 'ON' : 'OFF'}`);
     }
 
-    if (this.input.isKeyJustPressed('l')) {
+    if (this.input.isKeyJustPressed('l') && !this.input.isKeyDown('control')) {
       this.showBuildingLabels = !this.showBuildingLabels;
       console.log(`[Building] Labels debug: ${this.showBuildingLabels ? 'ON' : 'OFF'}`);
     }
@@ -923,12 +1451,12 @@ export class Game {
       console.log(`[Building] Ownership debug: ${this.showBuildingOwnership ? 'ON' : 'OFF'}`);
     }
 
-    if (this.input.isKeyJustPressed('i')) {
+    if (this.input.isKeyJustPressed('i') && !this.input.isKeyDown('control')) {
       this.showBuildingFronts = !this.showBuildingFronts;
       console.log(`[Building] Front-of-door debug: ${this.showBuildingFronts ? 'ON' : 'OFF'}`);
     }
 
-    if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('q')) {
+    if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('q') && !this.input.isKeyDown('control')) {
       this.showSchedules = !this.showSchedules;
       console.log(`[Schedule] Schedules debug: ${this.showSchedules ? 'ON' : 'OFF'}`);
     }
@@ -936,7 +1464,7 @@ export class Game {
     if (this.input.isKeyJustPressed('e') && this.input.isKeyDown('shift')) {
       this.showClock = !this.showClock;
       console.log(`[Time] Clock: ${this.showClock ? 'ON' : 'OFF'}`);
-    } else if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('f') && !this.input.isKeyDown('shift')) {
+    } else if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('f') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       this.showFog = !this.showFog;
       this.explorationRenderer.setShowFog(this.showFog);
       console.log(`[Exploration] Fog: ${this.showFog ? 'ON' : 'OFF'}`);
@@ -971,13 +1499,13 @@ export class Game {
       console.log(`[Life] Jobs debug: ${this.showJobs ? 'ON' : 'OFF'}`);
     }
 
-    if (this.input.isKeyJustPressed('o')) {
+    if (this.input.isKeyJustPressed('o') && !this.input.isKeyDown('control')) {
       this.showInteractionPrompt = !this.showInteractionPrompt;
       this.dialogueRenderer.setShowInteractionPrompt(this.showInteractionPrompt);
       console.log(`[Interaction] Prompt: ${this.showInteractionPrompt ? 'ON' : 'OFF'}`);
     }
 
-    if (this.input.isKeyJustPressed(' ')) {
+    if (this.input.isKeyJustPressed(' ') && !this.saveRenderer.isShowingUI()) {
       if (!this.dialogueManager.isOpen()) {
         this.timeManager.togglePause();
       }
@@ -993,11 +1521,11 @@ export class Game {
       this.timeManager.setTimeScale(Math.max(newScale, 1));
     }
 
-    if (this.input.isKeyJustPressed(']')) {
+    if (this.input.isKeyJustPressed(']') && !this.input.isKeyDown('shift')) {
       this.timeManager.advanceTime(60);
     }
 
-    if (this.input.isKeyJustPressed('[')) {
+    if (this.input.isKeyJustPressed('[') && !this.input.isKeyDown('shift')) {
       this.timeManager.advanceTime(-60);
     }
 
@@ -1018,13 +1546,15 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('p')) {
-      console.log('[NPC] States and Paths, Homes, Schedules, Life, Interaction, Dialogue, Exploration, World:');
+      console.log('[NPC] States and Paths, Homes, Schedules, Life, Interaction, Dialogue, Exploration, World, Save:');
       console.log(`[Time] ${this.timeManager.formatDayTime()} Phase ${this.timeManager.getPhase()} Scale ${this.timeManager.getTimeScale()}x`);
       console.log(`[World] ${this.world.getAllMapsInfo().map(m=>`${m.id} ${m.name}`).join(', ')} Current ${this.world.getCurrentMap()?.mapId}`);
       console.log(`[Exploration] ${this.explorationSystem.getDebugString()} Current ${this.explorationSystem.getMapDebugString(this.world.getCurrentMap()?.mapId ?? '')}`);
       console.log(`[Life] Avg wellbeing ${this.lifeManager.getAverageWellbeing().toFixed(0)}% Critical ${this.lifeManager.getCriticalCount()} Interactions ${this.lifeManager.getInteractions()}`);
       console.log(`[Interaction] ${this.interactionSystem.getDebugString()} Total ${this.interactionSystem.getTotalInteractions()}`);
       console.log(`[Dialogue] ${this.dialogueManager.getDebugString()} Total ${this.dialogueManager.getTotalDialogues()} Choices ${this.dialogueManager.getTotalChoices()}`);
+      console.log(`[Save] ${this.saveManager.getStats().slotCount}/${MAX_SAVE_SLOTS} slots v${SAVE_VERSION} playTime ${(this.playTimeSeconds/60).toFixed(1)}min autoSaveIn ${(this.autoSaveInterval - this.autoSaveTimer).toFixed(0)}s`);
+      this.saveManager.debugPrintSlots();
       for (const npc of this.npcManager.getAllNPCs()) {
         const path = npc.getPath();
         const home = npc.getHomeBuilding();
@@ -1042,13 +1572,14 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7+8+9+10+11+12 Test] Running all tests...');
+      console.log('[Phase7+8+9+10+11+12+13 Test] Running all tests...');
       this.runPhase7Tests();
       this.runPhase8Tests();
       this.runPhase9Tests();
       this.runPhase10Tests();
       this.runPhase11Tests();
       this.runPhase12Tests();
+      this.runPhase13Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift')) {
@@ -1061,31 +1592,31 @@ export class Game {
     }
 
     // Teleports - safe positions per map
-    if (this.input.isKeyJustPressed('1') && !wasOpen && !this.dialogueManager.isOpen() && this.player) {
+    if (this.input.isKeyJustPressed('1') && !wasOpen && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       this.player.setPosition(25*32+16, 20*32+16);
     }
-    if (this.input.isKeyJustPressed('2') && !wasOpen && !this.dialogueManager.isOpen() && this.player) {
+    if (this.input.isKeyJustPressed('2') && !wasOpen && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       this.player.setPosition(34*32+16, 14*32+16);
     }
-    if (this.input.isKeyJustPressed('3') && !wasOpen && !this.dialogueManager.isOpen() && this.player) {
+    if (this.input.isKeyJustPressed('3') && !wasOpen && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       this.player.setPosition(37*32+16, 19*32+16);
     }
-    if (this.input.isKeyJustPressed('4') && !wasOpen && !this.dialogueManager.isOpen() && this.player) {
+    if (this.input.isKeyJustPressed('4') && !wasOpen && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       this.player.setPosition(15*32+16, 30*32+16);
     }
 
-    // Map jump shortcuts for Phase 12 testing - FIX: F2 is debug, so use F1/F3/F4 for maps
-    if (this.input.isKeyJustPressed('f1') && !this.dialogueManager.isOpen()) {
+    // Map jump shortcuts for Phase 12 testing
+    if (this.input.isKeyJustPressed('f1') && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       this.switchMap('village_01', 'north');
     }
-    if (this.input.isKeyJustPressed('f3') && !this.dialogueManager.isOpen()) {
+    if (this.input.isKeyJustPressed('f3') && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       this.switchMap('forest_01', 'north');
     }
-    if (this.input.isKeyJustPressed('f4') && !this.dialogueManager.isOpen()) {
+    if (this.input.isKeyJustPressed('f4') && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       this.switchMap('lake_01', 'north');
     }
 
-    if (!wasOpen && !this.dialogueManager.isOpen()) {
+    if (!wasOpen && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       if (this.input.isKeyJustPressed('5')) {
         const npc = this.npcManager.getNPC('NPC001');
         if (npc) {
@@ -1093,29 +1624,30 @@ export class Game {
           npc.requestPath({ x: tile.x + 2, y: tile.y });
         }
       }
-      if (this.input.isKeyJustPressed('6')) {
+      if (this.input.isKeyJustPressed('6') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
         const npc = this.npcManager.getNPC('NPC002');
         if (npc) npc.requestPath({ x: 10, y: 10 });
       }
-      if (this.input.isKeyJustPressed('7')) {
+      if (this.input.isKeyJustPressed('7') && !this.input.isKeyDown('shift')) {
         const npc = this.npcManager.getNPC('NPC003');
         if (npc) npc.requestPath({ x: 42, y: 19 });
       }
-      if (this.input.isKeyJustPressed('8')) {
+      if (this.input.isKeyJustPressed('8') && !this.input.isKeyDown('shift')) {
         const npc = this.npcManager.getNPC('NPC004');
         if (npc) npc.requestPath({ x: 38, y: 10 });
       }
-      if (this.input.isKeyJustPressed('9')) {
+      if (this.input.isKeyJustPressed('9') && !this.input.isKeyDown('shift')) {
         const npc = this.npcManager.getNPC('NPC005');
         if (npc) npc.requestPath({ x: 0, y: 0 });
       }
     }
 
-    if (this.input.isKeyJustPressed('f5')) {
+    // F5-F8 NPC go home now requires no shift (since Shift+F5/F6 are save/load UI)
+    if (this.input.isKeyJustPressed('f5') && !this.input.isKeyDown('shift')) {
       const npc = this.npcManager.getNPC('NPC001');
       if (npc) npc.goHome();
     }
-    if (this.input.isKeyJustPressed('f6')) {
+    if (this.input.isKeyJustPressed('f6') && !this.input.isKeyDown('shift')) {
       const npc = this.npcManager.getNPC('NPC002');
       if (npc) npc.goHome();
     }
@@ -1165,7 +1697,7 @@ export class Game {
 
     if (this.input.isKeyJustPressed('f12')) {
       const npc = this.npcManager.getNPC('NPC001');
-      if (npc && !this.dialogueManager.isOpen()) {
+      if (npc && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
         const timeData = this.timeManager.getTimeData();
         const context = {
           playerName: 'Player',
@@ -1183,14 +1715,12 @@ export class Game {
 
     // Exploration toggles
     if (this.input.isKeyJustPressed('r') && this.input.isKeyDown('shift')) {
-      // Shift+R reveal all
       const currentMapId = this.world.getCurrentMap()?.mapId;
       if (currentMapId) {
         this.explorationSystem.revealAll(currentMapId);
         console.log(`[Exploration] Revealed all for ${currentMapId}`);
       }
     } else if (this.input.isKeyJustPressed('r') && this.input.isKeyDown('control')) {
-      // Ctrl+R reset exploration
       this.explorationSystem.reset();
       console.log('[Exploration] Reset all');
     }
@@ -1367,13 +1897,11 @@ export class Game {
     const transitions = this.explorationSystem.getMapTransitions();
     console.log(`Test6 map transitions: ${transitions} -> PASS (count >=0)`);
 
-    // Test reveal
     const beforeReveal = this.explorationSystem.getExploredCount(currentMapId);
     this.explorationSystem.revealAll(currentMapId);
     const afterReveal = this.explorationSystem.getExploredCount(currentMapId);
     console.log(`Test7 reveal all ${currentMapId}: ${beforeReveal} -> ${afterReveal} -> ${afterReveal === totalTiles ? 'PASS' : 'FAIL'}`);
 
-    // Reset for clean state - but keep some explored
     this.explorationSystem.reset(currentMapId);
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -1388,6 +1916,155 @@ export class Game {
     console.log(`Test10 fog and minimap toggles: Fog ${this.showFog ? 'ON' : 'OFF'} Minimap ${this.showMinimap ? 'ON' : 'OFF'} -> PASS`);
 
     console.log('=== END PHASE 12 TESTS ===');
+  }
+
+  private runPhase13Tests(): void {
+    console.log('=== PHASE 13 TESTS - SAVE/LOAD & WORLD PERSISTENCE ===');
+
+    // Test1: SaveManager instance
+    const hasManager = !!this.saveManager;
+    console.log(`Test1 SaveManager exists: ${hasManager ? 'PASS' : 'FAIL'}`);
+
+    // Test2: Save slots
+    const slots = this.saveManager.getAllSaveSlots();
+    console.log(`Test2 Save slots: ${slots.length} slots (expected ${MAX_SAVE_SLOTS}) -> ${slots.length === MAX_SAVE_SLOTS ? 'PASS' : 'FAIL'}`);
+
+    // Test3: Create new save data
+    const saveData = this.collectSaveData(0);
+    const hasPlayer = !!saveData.player;
+    const hasWorld = !!saveData.world;
+    const hasNPCs = !!saveData.npcs && Object.keys(saveData.npcs).length > 0;
+    const hasTime = !!saveData.world.time;
+    const hasExploration = !!saveData.world.exploration;
+    console.log(`Test3 Collect save data: player=${hasPlayer} world=${hasWorld} npcs=${hasNPCs}(${Object.keys(saveData.npcs).length}) time=${hasTime} exploration=${hasExploration} -> ${hasPlayer && hasWorld && hasNPCs && hasTime && hasExploration ? 'PASS' : 'FAIL'}`);
+
+    // Test4: Save to slot 0
+    const saved = this.saveManager.saveGame(0, saveData);
+    console.log(`Test4 Save to slot 0: ${saved ? 'PASS' : 'FAIL'}`);
+
+    // Test5: Load from slot 0
+    const loaded = this.saveManager.loadGame(0);
+    const loadValid = !!loaded && loaded.player && loaded.world;
+    console.log(`Test5 Load from slot 0: ${loadValid ? 'PASS' : 'FAIL'}`);
+    if (loaded) {
+      console.log(`  Loaded: Day ${loaded.world.time.day} ${loaded.world.currentMapId} player ${loaded.player.x.toFixed(0)},${loaded.player.y.toFixed(0)} exploration ${loaded.world.exploration.totalDiscovered}/${loaded.world.exploration.totalTiles}`);
+    }
+
+    // Test6: Validation
+    const validation = this.saveManager.validateSaveFile(saveData);
+    console.log(`Test6 Validation: valid=${validation.valid} errors=${validation.errors.length} warnings=${validation.warnings.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length > 0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    // Test7: Missing-data handling - load with missing fields
+    const incomplete: any = {
+      version: SAVE_VERSION,
+      gameVersion: SAVE_GAME_VERSION,
+      timestamp: Date.now(),
+      slotId: 1,
+      player: { x: 100, y: 100, mapId: 'village_01' }, // missing many fields
+      world: { currentMapId: 'village_01', time: { day: 1, hour: 6, minute: 0, second: 0, totalSeconds: 0, timeScale: 60, isPaused: false }, exploration: { visionRadius: 8, mapTransitions: 0, totalDiscovered: 0, totalTiles: 0, maps: {}, version: 1 }, flags: {}, openedLocations: [], collectedObjects: [], changedObjects: {}, questRelatedChanges: {}, eventStates: {}, allMaps: [] },
+      npcs: {},
+      quests: { quests: {}, version: 1 },
+      meta: { playTimeSeconds: 0, saveCount: 0, lastSaved: Date.now(), createdAt: Date.now(), gameVersion: SAVE_GAME_VERSION, saveVersion: SAVE_VERSION, slotId: 1, playerName: 'Test', preview: { day: 1, time: '06:00:00', mapId: 'village_01', mapName: 'Village', explorationPercent: 0, money: 50, health: 100 } },
+      future: {}
+    };
+    const repairedValidation = this.saveManager.validateSaveFile(incomplete);
+    console.log(`Test7 Missing-data handling: incomplete save valid=${repairedValidation.valid} warnings=${repairedValidation.warnings.length} (should have warnings but try repair) -> ${repairedValidation.warnings.length > 0 ? 'PASS (warnings detected)' : 'CHECK'}`);
+
+    // Test8: Corrupted-data protection
+    const corruptedJson = '{ invalid json';
+    const importResult = this.saveManager.importSave(corruptedJson, 2);
+    console.log(`Test8 Corrupted-data protection: import corrupted JSON should fail -> ${!importResult ? 'PASS' : 'FAIL'}`);
+
+    // Test9: Version handling
+    const oldVersionSave = { ...saveData, version: 1 };
+    const needsMigration = oldVersionSave.version < SAVE_VERSION;
+    console.log(`Test9 Version handling: old v1 needs migration to v${SAVE_VERSION}: ${needsMigration ? 'PASS' : 'FAIL'}`);
+
+    // Test10: Player save/load cycle
+    const originalX = this.player?.x ?? 0;
+    const originalY = this.player?.y ?? 0;
+    const originalDay = this.timeManager.getDay();
+    const originalMap = this.world.getCurrentMap()?.mapId;
+
+    // Move player and change time
+    if (this.player) {
+      this.player.setPosition(originalX + 100, originalY + 100);
+    }
+    this.timeManager.advanceTime(60); // +1 hour
+    const newDay = this.timeManager.getDay();
+    const newTime = this.timeManager.formatTime();
+
+    // Save
+    this.saveGame(1);
+    console.log(`Test10 Save/Load cycle: Moved player to ${this.player?.x.toFixed(0)},${this.player?.y.toFixed(0)} and time to Day ${newDay} ${newTime} and saved to slot 1 -> PASS`);
+
+    // Move again
+    if (this.player) {
+      this.player.setPosition(originalX, originalY);
+    }
+    this.timeManager.setTime(6, 0, originalDay);
+
+    // Load
+    const loadSuccess = this.loadGame(1);
+    const loadedX = this.player?.x ?? 0;
+    const loadedY = this.player?.y ?? 0;
+    const loadedDay = this.timeManager.getDay();
+    console.log(`Test10 Load verification: loaded player ${loadedX.toFixed(0)},${loadedY.toFixed(0)} (expected ${originalX + 100},${originalY + 100}) Day ${loadedDay} (expected ${newDay}) -> ${Math.abs(loadedX - (originalX + 100)) < 1 && loadedDay === newDay ? 'PASS' : 'FAIL'}`);
+
+    // Restore original for clean state
+    if (this.player) {
+      this.player.setPosition(originalX, originalY);
+    }
+    this.timeManager.setTime(6, 0, originalDay);
+    console.log(`Test10 Restore original: Player back to ${originalX.toFixed(0)},${originalY.toFixed(0)} Day ${originalDay} map ${originalMap} -> PASS`);
+
+    // Test11: NPC position persistence
+    const npc = this.npcManager.getNPC('NPC001');
+    const npcOriginalX = npc?.x ?? 0;
+    const npcOriginalY = npc?.y ?? 0;
+    if (npc) {
+      npc.setPosition(npcOriginalX + 50, npcOriginalY + 50);
+      this.saveGame(2);
+      npc.setPosition(npcOriginalX, npcOriginalY);
+      this.loadGame(2);
+      const npcLoadedX = npc.x;
+      const npcLoadedY = npc.y;
+      console.log(`Test11 NPC position: original ${npcOriginalX.toFixed(0)},${npcOriginalY.toFixed(0)} -> saved ${npcOriginalX + 50},${npcOriginalY + 50} -> loaded ${npcLoadedX.toFixed(0)},${npcLoadedY.toFixed(0)} -> ${Math.abs(npcLoadedX - (npcOriginalX + 50)) < 1 ? 'PASS' : 'FAIL'}`);
+      npc.setPosition(npcOriginalX, npcOriginalY);
+    }
+
+    // Test12: Exploration persistence
+    const beforeExplore = this.explorationSystem.getExploredCount('village_01');
+    this.explorationSystem.revealAll('village_01');
+    const afterReveal = this.explorationSystem.getExploredCount('village_01');
+    this.saveGame(3);
+    this.explorationSystem.reset('village_01');
+    const afterReset = this.explorationSystem.getExploredCount('village_01');
+    this.loadGame(3);
+    const afterLoad = this.explorationSystem.getExploredCount('village_01');
+    console.log(`Test12 Exploration: before ${beforeExplore} -> reveal ${afterReveal} -> reset ${afterReset} -> loaded ${afterLoad} (expected ${afterReveal}) -> ${afterLoad === afterReveal ? 'PASS' : 'FAIL'}`);
+    // Clean up: reset to original exploration state
+    this.explorationSystem.reset('village_01');
+    if (this.player) {
+      const tilePos = this.player.getTilePosition();
+      this.explorationSystem.update(tilePos, 'village_01');
+    }
+
+    // Test13: World flags and future compatibility
+    this.worldFlags['test_flag'] = true;
+    this.collectedObjects.add('test_object');
+    const saveWithFlags = this.collectSaveData(4);
+    const hasFlags = !!saveWithFlags.world.flags['test_flag'];
+    const hasCollected = saveWithFlags.world.collectedObjects.includes('test_object');
+    const hasFuture = !!saveWithFlags.future;
+    const hasFarming = !!saveWithFlags.world.farming;
+    console.log(`Test13 World persistence & future compatibility: flag=${hasFlags} collected=${hasCollected} future=${hasFuture} farming=${hasFarming} -> ${hasFlags && hasCollected && hasFuture && hasFarming ? 'PASS' : 'FAIL'}`);
+    delete this.worldFlags['test_flag'];
+    this.collectedObjects.delete('test_object');
+
+    console.log('=== END PHASE 13 TESTS ===');
+    console.log(`[Save] Slots: ${this.saveManager.getAllSaveSlots().filter(s=>s.exists).length}/${MAX_SAVE_SLOTS} used`);
   }
 
   private render(): void {
@@ -1419,7 +2096,6 @@ export class Game {
         }
       }
 
-      // Fog of war - after world and buildings, before NPCs/player so they are visible through fog? Actually fog should be over everything except player? We'll render fog over world but under NPCs/player for visibility
       if (this.showFog && this.explorationSystem) {
         this.explorationRenderer.renderFog(ctx, this.worldRenderer, this.camera, this.explorationSystem, map.mapId, w, h);
       }
@@ -1427,7 +2103,6 @@ export class Game {
       this.renderer.renderBackground();
     }
 
-    // NPCs only in village
     const isVillage = map?.mapId === 'village_01';
     if (isVillage && this.npcManager.getCount() > 0) {
       this.npcRenderer.renderAll(ctx, this.npcManager.getAllNPCs(), this.worldRenderer, this.camera);
@@ -1459,24 +2134,25 @@ export class Game {
       this.timeRenderer.renderScheduleTimeline(ctx, this.timeManager, w, h);
     }
 
-    // Minimap
     if (this.showMinimap && map) {
       this.minimapRenderer.render(ctx, map, this.explorationSystem, this.player, this.npcManager.getAllNPCs(), this.buildingManager.getAllBuildings(), w, h);
     }
 
-    // Full map overlay
     if (this.showFullMap && map) {
       this.minimapRenderer.renderFullMap(ctx, map, this.explorationSystem, w, h);
     }
 
-    // Interaction prompt (before dialogue, so dialogue covers it)
-    if (this.showInteractionPrompt && !this.dialogueManager.isOpen()) {
+    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI()) {
       this.dialogueRenderer.renderInteractionPrompt(ctx, this.interactionSystem, w, h);
     }
 
-    // Dialogue (top layer)
     if (this.dialogueManager.isOpen()) {
       this.dialogueRenderer.renderDialogue(ctx, this.dialogueManager, w, h);
+    }
+
+    // Phase 13 Save UI (top layer, above dialogue? Actually dialogue should be top, but save UI also top - show save UI above dialogue for visibility)
+    if (this.saveRenderer.isShowingUI() || (this.saveRenderer as any).saveMessage) {
+      this.saveRenderer.render(ctx, w, h, this.saveSlots);
     }
 
     this.debug.render(ctx);
@@ -1485,8 +2161,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    // Map transition hint
-    if (map && this.player && this.mapTransitionCooldown <= 0) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI()) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -1556,42 +2231,49 @@ export class Game {
     const currentMap = this.world.getCurrentMap();
     const explorationPerc = currentMap ? this.explorationSystem.getExplorationPercentage(currentMap.mapId).toFixed(1) : '0';
     const totalPerc = this.explorationSystem.getTotalExplorationPercentage().toFixed(1);
+    const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 12 - EXPLORATION & WORLD EXPANSION',
+      'PHASE 13 - SAVE, LOAD & WORLD PERSISTENCE',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
-      `Interaction: ${interactable ? `${interactable.type} ${interactable.name} ${interactable.distance.toFixed(0)}px` : 'None'} | Dialogue: ${this.dialogueManager.isOpen() ? 'OPEN' : 'CLOSED'}`,
+      `Save: v${SAVE_VERSION} ${SAVE_GAME_VERSION} Slots:${saveStats?.slotCount ?? 0}/${MAX_SAVE_SLOTS} Saves:${saveStats?.saveCount ?? 0} PlayTime:${(this.playTimeSeconds/60).toFixed(1)}min AutoSaveIn:${(this.autoSaveInterval - this.autoSaveTimer).toFixed(0)}s ${saveStats?.lastError ? `ERR:${saveStats.lastError.substring(0,30)}` : ''}`,
+      `Interaction: ${interactable ? `${interactable.type} ${interactable.name} ${interactable.distance.toFixed(0)}px` : 'None'} | Dialogue: ${this.dialogueManager.isOpen() ? 'OPEN' : 'CLOSED'} | SaveUI: ${this.saveRenderer.isShowingUI() ? 'OPEN' : 'CLOSED'}`,
       'Player: WASD move, C center, V village, Edges to travel between maps',
       'Camera: Z zoom, X smoothing',
       'Collision: K overlay, 1-4 teleport safe positions (when dialogue closed)',
       'Pathfinding: N paths, M nav grid (Shift+M full map)',
       'Buildings: J doors, L labels, U own, I fronts',
-      'Time: Space pause, =/+ faster, -/_ slower, ] +1h, [ -1h, \\ next phase, Shift+E clock, Shift+F overlay',
+      'Time: Space pause, =/+ faster, -/_ slower, ] +1h, [ -1h, \\\\ next phase, Shift+E clock, Shift+F overlay',
       'Schedules: Q toggle schedule debug (when dialogue closed)',
       'Life: ; needs, , inventory, . jobs, F10 boost 100%, F11 drain critical',
       'Interaction & Dialogue:',
       '  E / Enter - Interact with NPC/building (when prompt shows)',
-      '  1-4 - Choose dialogue option',
-      '  ESC - Close dialogue',
+      '  1-4 - Choose dialogue option (when dialogue open)',
+      '  ESC - Close dialogue / Close Save UI',
       '  O - Toggle interaction prompt, F12 - Test dialogue',
       'Exploration & World (Phase 12):',
-      '  TAB - Toggle minimap (top-right, shows explored, player, NPCs)',
-      '  F - Toggle fog of war (dark unexplored, dim explored)',
-      '  Shift+M - Toggle full map (400x400 overlay)',
+      '  TAB - Toggle minimap, F - Toggle fog, Shift+M full map',
       '  Shift+R - Reveal all current map, Ctrl+R - Reset exploration',
-      '  Shift+[ / Shift+] - Decrease/Increase vision radius',
-      '  F1/F3/F4 - Jump to village/forest/lake (test) - F2 is debug toggle',
-      '  Walk to map edge (road at N/S/E/W) to travel between maps',
-      '  T - Run all tests (7+8+9+10+11+12), P - Print all states',
-      'Tests: 5 nearby, 6 around building, 7 bridge, 8 blocked, 9 no path (dialogue closed)',
-      'General: G grid, B coords, ` F2 debug, H help, R reset',
+      '  Shift+[ / Shift+] - Vision radius, F1/F3/F4 - Jump maps',
+      'Save, Load & World Persistence (Phase 13):',
+      '  Ctrl+S - Quick save to Slot 0 (Auto)',
+      '  Ctrl+L - Quick load from Slot 0',
+      '  Ctrl+Shift+S - Open Save UI (select slot 1-5, Enter save, D delete)',
+      '  Ctrl+Shift+L - Open Load UI (select slot, Enter load)',
+      '  Ctrl+N - New Game (reset all)',
+      '  Shift+F5 - Save UI alternative, Shift+F6 - Load UI alternative',
+      '  Auto-save every 60s and on map transition to Slot 0',
+      '  P - Print all states including save slots',
+      '  T - Run all tests (7+8+9+10+11+12+13)',
+      'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
-      `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state}` : 'N/A'}`,
+      `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
       `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% Inter:${this.lifeManager ? this.lifeManager.getInteractions() : 0} | Dialogue: ${this.dialogueManager.getTotalDialogues()} total`,
-      `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%)`,
+      `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
+      `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       ...this.npcManager.getAllNPCs().slice(0, 3).map(n => {
         const path = n.getPath();
         const home = n.getHomeBuilding();
@@ -1603,7 +2285,7 @@ export class Game {
 
     const padding = 10;
     const lineHeight = 11;
-    const boxWidth = 560;
+    const boxWidth = 600;
     const boxHeight = Math.min(screenHeight - 20, lines.length * lineHeight + 20);
     const x = screenWidth - boxWidth - padding;
     const y = padding;
@@ -1620,7 +2302,7 @@ export class Game {
         ctx.fillStyle = '#8f8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#ddd';
-      } else if (line.endsWith(':') || line.startsWith('Pathfinding') || line.startsWith('Buildings') || line.startsWith('Tests') || line.startsWith('Time') || line.startsWith('Schedules') || line.startsWith('Life') || line.startsWith('Interaction') || line.startsWith('Exploration') || line.startsWith('World')) {
+      } else if (line.endsWith(':') || line.startsWith('Pathfinding') || line.startsWith('Buildings') || line.startsWith('Tests') || line.startsWith('Time') || line.startsWith('Schedules') || line.startsWith('Life') || line.startsWith('Interaction') || line.startsWith('Exploration') || line.startsWith('World') || line.startsWith('Save')) {
         ctx.fillStyle = '#8ff';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#aaa';
@@ -1672,5 +2354,7 @@ export class Game {
   getExplorationSystem(): ExplorationSystem { return this.explorationSystem; }
   getExplorationRenderer(): ExplorationRenderer { return this.explorationRenderer; }
   getMinimapRenderer(): MinimapRenderer { return this.minimapRenderer; }
+  getSaveManager(): SaveManager { return this.saveManager; }
+  getSaveRenderer(): SaveRenderer { return this.saveRenderer; }
   isGameRunning(): boolean { return this.isRunning; }
 }

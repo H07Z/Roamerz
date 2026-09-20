@@ -49,6 +49,14 @@ export class InputManager {
 
     // Also track code for special keys
     this.keys.set(e.code.toLowerCase(), true);
+
+    // Phase 13: Prevent browser default for save shortcuts (Ctrl+S, Ctrl+L, Ctrl+N, Ctrl+Shift+S/L)
+    if (e.ctrlKey) {
+      const k = e.key.toLowerCase();
+      if (k === 's' || k === 'l' || k === 'n') {
+        e.preventDefault();
+      }
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {

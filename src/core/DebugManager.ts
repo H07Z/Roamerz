@@ -189,6 +189,21 @@ export interface WorldDebugInfo {
   playerMapId: string;
 }
 
+export interface SaveDebugInfo {
+  version: number;
+  gameVersion: string;
+  slotCount: number;
+  maxSlots: number;
+  saveCount: number;
+  lastSave: number;
+  lastLoad: number;
+  lastError: string | null;
+  corrupted: number;
+  playTime: number;
+  autoSaveIn: number;
+  showDebug: boolean;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -227,7 +242,8 @@ export class DebugManager {
   private dialogueInfo: DialogueDebugInfo | null = null;
   private explorationInfo: ExplorationDebugInfo | null = null;
   private worldInfo: WorldDebugInfo | null = null;
-  private currentPhase: string = '12';
+  private saveInfo: SaveDebugInfo | null = null;
+  private currentPhase: string = '13';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -276,6 +292,7 @@ export class DebugManager {
   setDialogueInfo(info: DialogueDebugInfo): void { this.dialogueInfo = info; }
   setExplorationInfo(info: ExplorationDebugInfo): void { this.explorationInfo = info; }
   setWorldInfo(info: WorldDebugInfo): void { this.worldInfo = info; }
+  setSaveInfo(info: SaveDebugInfo): void { this.saveInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -300,6 +317,7 @@ export class DebugManager {
     const mapHeight = this.mapInfo ? 15 : 0;
     const worldHeight = this.worldInfo ? 25 : 0;
     const explorationHeight = this.explorationInfo ? 20 : 0;
+    const saveHeight = this.saveInfo ? 20 : 0;
     const timeHeight = this.timeInfo ? 35 : 0;
     const playerHeight = this.playerInfo ? 15 : 0;
     const cameraHeight = this.cameraInfo ? 15 : 0;
@@ -314,7 +332,7 @@ export class DebugManager {
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -345,6 +363,15 @@ export class DebugManager {
     if (this.explorationInfo) {
       ctx.fillStyle = '#fa8';
       ctx.fillText(`EXPLORATION: ${this.explorationInfo.currentMapName} ${this.explorationInfo.discovered}/${this.explorationInfo.total} (${this.explorationInfo.percentage.toFixed(1)}%) Total ${this.explorationInfo.totalDiscovered}/${this.explorationInfo.totalTiles} (${this.explorationInfo.totalPercentage.toFixed(1)}%) Vision:${this.explorationInfo.visionRadius} Trans:${this.explorationInfo.transitions} Fog:${this.explorationInfo.showFog?'ON':'OFF'}(F) Mini:${this.explorationInfo.showMinimap?'ON':'OFF'}(TAB)`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.saveInfo) {
+      ctx.fillStyle = '#8f8';
+      const lastSaveStr = this.saveInfo.lastSave ? new Date(this.saveInfo.lastSave).toLocaleTimeString() : 'never';
+      const lastLoadStr = this.saveInfo.lastLoad ? new Date(this.saveInfo.lastLoad).toLocaleTimeString() : 'never';
+      ctx.fillText(`SAVE: v${this.saveInfo.version} ${this.saveInfo.gameVersion} Slots:${this.saveInfo.slotCount}/${this.saveInfo.maxSlots} Saves:${this.saveInfo.saveCount} Corrupt:${this.saveInfo.corrupted} Play:${(this.saveInfo.playTime/60).toFixed(1)}m Auto:${this.saveInfo.autoSaveIn.toFixed(0)}s LastSave:${lastSaveStr} LastLoad:${lastLoadStr} ${this.saveInfo.lastError ? `ERR:${this.saveInfo.lastError.substring(0,20)}` : ''}`, x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }
@@ -510,7 +537,7 @@ export class DebugManager {
     ctx.fillText('ROAMERZ', canvasWidth / 2, canvasHeight / 2 - 20);
     ctx.font = '11px monospace';
     ctx.fillStyle = 'rgba(180,255,180,0.8)';
-    ctx.fillText(`Phase 12 - Exploration & World Expansion`, canvasWidth / 2, canvasHeight / 2);
+    ctx.fillText(`Phase 13 - Save, Load & World Persistence`, canvasWidth / 2, canvasHeight / 2);
     ctx.restore();
   }
 }

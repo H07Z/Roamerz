@@ -1092,4 +1092,155 @@ export class NPC {
   setDestinationWorld(worldX: number, worldY: number): boolean {
     return this.requestPathToWorld(worldX, worldY);
   }
+
+  // Phase 13 Save/Load
+  getSaveData(mapId: string = 'village_01'): any {
+    const needsData = this.needs ? {
+      energy: this.needs.getNeed('ENERGY' as any),
+      hunger: this.needs.getNeed('HUNGER' as any),
+      social: this.needs.getNeed('SOCIAL' as any),
+      happiness: this.needs.getNeed('HAPPINESS' as any),
+      health: this.needs.getNeed('HEALTH' as any),
+      overall: this.needs.getOverallWellbeing()
+    } : {
+      energy: 80,
+      hunger: 80,
+      social: 70,
+      happiness: 75,
+      health: 90,
+      overall: 79
+    };
+
+    const inventoryData = this.inventory ? {
+      items: Array.from(this.inventory.getAllItems().entries()).map(([type, count]) => ({ type, count })),
+      totalValue: this.inventory.getTotalValue(),
+      version: 1
+    } : {
+      items: [],
+      totalValue: 0,
+      version: 1
+    };
+
+    const jobData = this.job ? {
+      type: this.job.type,
+      workDone: this.job.getWorkDone(),
+      itemsProduced: this.job.getItemsProduced(),
+      coinsEarned: this.job.getCoinsEarned(),
+      progress: this.job.getWorkProgress()
+    } : {
+      type: 'NONE',
+      workDone: 0,
+      itemsProduced: 0,
+      coinsEarned: 0,
+      progress: 0
+    };
+
+    return {
+      id: this.id,
+      name: this.name,
+      role: this.role,
+      x: this.x,
+      y: this.y,
+      mapId,
+      direction: this.direction,
+      state: this.state,
+      currentActivity: this.currentActivity,
+      scheduleEnabled: this.scheduleEnabled,
+      lastScheduleMinutes: this.lastScheduleMinutes,
+      homeId: this.homeId,
+      stats: {
+        homeVisits: this.homeVisits,
+        scheduleChanges: this.scheduleChanges,
+        socialInteractions: this.socialInteractions,
+        itemsProduced: this.itemsProduced,
+        totalDistance: this.totalDistanceTraveled,
+        requests: this.pathRequests,
+        found: this.pathsFound,
+        failed: this.pathsFailed
+      },
+      needs: needsData,
+      inventory: inventoryData,
+      job: jobData,
+      relationships: (this as any).relationships ?? {},
+      relationshipStages: (this as any).relationshipStages ?? {},
+      memory: (this as any).memory ?? [],
+      questState: (this as any).questState ?? {},
+      flags: (this as any).flags ?? {},
+      farming: (this as any).farming ?? {},
+      dialogueHistory: (this as any).dialogueHistory ?? []
+    };
+  }
+
+  loadSaveData(data: any): void {
+    if (!data) return;
+    try {
+      this.x = typeof data.x === 'number' ? data.x : this.x;
+      this.y = typeof data.y === 'number' ? data.y : this.y;
+      this.direction = data.direction ?? this.direction;
+      this.state = data.state ?? this.state;
+      this.currentActivity = data.currentActivity ?? this.currentActivity;
+      this.scheduleEnabled = typeof data.scheduleEnabled === 'boolean' ? data.scheduleEnabled : this.scheduleEnabled;
+      this.lastScheduleMinutes = typeof data.lastScheduleMinutes === 'number' ? data.lastScheduleMinutes : this.lastScheduleMinutes;
+      this.homeVisits = data.stats?.homeVisits ?? this.homeVisits;
+      this.scheduleChanges = data.stats?.scheduleChanges ?? this.scheduleChanges;
+      this.socialInteractions = data.stats?.socialInteractions ?? this.socialInteractions;
+      this.itemsProduced = data.stats?.itemsProduced ?? this.itemsProduced;
+      this.totalDistanceTraveled = data.stats?.totalDistance ?? this.totalDistanceTraveled;
+      this.pathRequests = data.stats?.requests ?? this.pathRequests;
+      this.pathsFound = data.stats?.found ?? this.pathsFound;
+      this.pathsFailed = data.stats?.failed ?? this.pathsFailed;
+
+      // Needs
+      if (data.needs && this.needs) {
+        const needs = data.needs;
+        if (typeof needs.energy === 'number') this.needs.setNeed('ENERGY' as any, needs.energy);
+        if (typeof needs.hunger === 'number') this.needs.setNeed('HUNGER' as any, needs.hunger);
+        if (typeof needs.social === 'number') this.needs.setNeed('SOCIAL' as any, needs.social);
+        if (typeof needs.happiness === 'number') this.needs.setNeed('HAPPINESS' as any, needs.happiness);
+        if (typeof needs.health === 'number') this.needs.setNeed('HEALTH' as any, needs.health);
+      }
+
+      // Inventory
+      if (data.inventory && this.inventory) {
+        if (Array.isArray(data.inventory.items)) {
+          this.inventory.clear();
+          for (const item of data.inventory.items) {
+            if (item.type && typeof item.count === 'number') {
+              this.inventory.addItem(item.type as any, item.count);
+            }
+          }
+        }
+      }
+
+      // Job
+      if (data.job && this.job) {
+        // Job doesn't have direct setters for all, but we can set via properties if available
+        // For now, we store workDone etc in job object via any
+        (this.job as any).workDone = data.job.workDone ?? 0;
+        (this.job as any).itemsProduced = data.job.itemsProduced ?? 0;
+        (this.job as any).coinsEarned = data.job.coinsEarned ?? 0;
+      }
+
+      // Relationships, memory, flags
+      (this as any).relationships = data.relationships ?? {};
+      (this as any).relationshipStages = data.relationshipStages ?? {};
+      (this as any).memory = Array.isArray(data.memory) ? data.memory : [];
+      (this as any).questState = data.questState ?? {};
+      (this as any).flags = data.flags ?? {};
+      (this as any).farming = data.farming ?? {};
+      (this as any).dialogueHistory = Array.isArray(data.dialogueHistory) ? data.dialogueHistory : [];
+
+      console.log(`[NPC] ${this.id} loaded save: pos ${this.x.toFixed(0)},${this.y.toFixed(0)} state ${this.state} activity ${this.currentActivity}`);
+    } catch (e) {
+      console.error(`[NPC] ${this.id} failed to load save data:`, e);
+    }
+  }
+
+  // For Phase 13 testing - set position directly
+  setPosition(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.lastX = x;
+    this.lastY = y;
+  }
 }

@@ -215,4 +215,114 @@ export class ExplorationSystem {
     if (!data) return `${mapId} not found`;
     return `${mapId}: ${data.discoveredCount}/${data.totalTiles} (${this.getExplorationPercentage(mapId).toFixed(1)}%)`;
   }
+
+  // Phase 13 Save/Load
+  getSaveData(): any {
+    const maps: Record<string, any> = {};
+    for (const [mapId, data] of this.explorationMap.entries()) {
+      // Compress explored boolean[] to string of 0/1
+      const exploredStr = data.explored.map((b: boolean) => b ? '1' : '0').join('');
+      maps[mapId] = {
+        mapId,
+        width: data.width,
+        height: data.height,
+        discoveredCount: data.discoveredCount,
+        totalTiles: data.totalTiles,
+        exploredData: exploredStr
+      };
+    }
+
+    return {
+      visionRadius: this.visionRadius,
+      mapTransitions: this.mapTransitions,
+      totalDiscovered: this.totalDiscovered,
+      totalTiles: this.totalTiles,
+      maps,
+      version: 1
+    };
+  }
+
+  loadSaveData(data: any): void {
+    if (!data) return;
+    try {
+      this.visionRadius = typeof data.visionRadius === 'number' ? data.visionRadius : 8;
+      this.mapTransitions = typeof data.mapTransitions === 'number' ? data.mapTransitions : 0;
+
+      if (data.maps && typeof data.maps === 'object') {
+        for (const mapId of Object.keys(data.maps)) {
+          const savedMap = data.maps[mapId];
+          const existing = this.explorationMap.get(mapId);
+          if (!existing) {
+            // If map not initialized, create entry
+            const width = savedMap.width ?? 50;
+            const height = savedMap.height ?? 40;
+            const total = width * height;
+            const exploredData: boolean[] = savedMap.exploredData
+              ? savedMap.exploredData.split('').map((c: string) => c === '1')
+              : new Array(total).fill(false);
+
+            // Ensure length matches
+            let finalExplored = exploredData;
+            if (exploredData.length !== total) {
+              console.warn(`[Exploration] Saved explored length mismatch for ${mapId}: ${exploredData.length} vs ${total}, truncating/padding`);
+              finalExplored = new Array(total).fill(false);
+              for (let i = 0; i < Math.min(exploredData.length, total); i++) {
+                finalExplored[i] = exploredData[i];
+              }
+            }
+
+            const discoveredCount = finalExplored.filter((b: boolean) => b).length;
+
+            this.explorationMap.set(mapId, {
+              explored: finalExplored,
+              visible: new Array(total).fill(false),
+              width,
+              height,
+              discoveredCount,
+              totalTiles: total
+            });
+          } else {
+            // Update existing
+            if (savedMap.exploredData && typeof savedMap.exploredData === 'string') {
+              const exploredData = savedMap.exploredData.split('').map((c: string) => c === '1');
+              if (exploredData.length === existing.explored.length) {
+                existing.explored = exploredData;
+                existing.discoveredCount = exploredData.filter((b: boolean) => b).length;
+              } else {
+                console.warn(`[Exploration] Length mismatch on load for ${mapId}, keeping existing but updating count`);
+                existing.discoveredCount = typeof savedMap.discoveredCount === 'number' ? savedMap.discoveredCount : existing.discoveredCount;
+                // Try to apply as much as possible
+                for (let i = 0; i < Math.min(exploredData.length, existing.explored.length); i++) {
+                  existing.explored[i] = exploredData[i];
+                }
+              }
+            } else if (typeof savedMap.discoveredCount === 'number') {
+              existing.discoveredCount = savedMap.discoveredCount;
+            }
+          }
+        }
+      }
+
+      // Recalculate totalDiscovered
+      this.totalDiscovered = 0;
+      this.totalTiles = 0;
+      for (const data of this.explorationMap.values()) {
+        this.totalDiscovered += data.discoveredCount;
+        this.totalTiles += data.totalTiles;
+      }
+
+      console.log(`[Exploration] Loaded save: ${this.totalDiscovered}/${this.totalTiles} (${this.getTotalExplorationPercentage().toFixed(1)}%) vision ${this.visionRadius} transitions ${this.mapTransitions}`);
+    } catch (e) {
+      console.error('[Exploration] Failed to load save data:', e);
+    }
+  }
+
+  // For Phase 13 testing - get all explored data for verification
+  getAllExploredData(): Record<string, { discovered: number; total: number }> {
+    const result: Record<string, { discovered: number; total: number }> = {};
+    for (const [mapId, data] of this.explorationMap.entries()) {
+      result[mapId] = { discovered: data.discoveredCount, total: data.totalTiles };
+    }
+    return result;
+  }
 }

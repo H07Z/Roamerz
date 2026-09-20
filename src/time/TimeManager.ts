@@ -266,4 +266,36 @@ export class TimeManager {
   getDayPhaseName(): string {
     return this.lastPhase;
   }
+
+  // Phase 13 Save/Load
+  getSaveData(): any {
+    return {
+      day: this.day,
+      hour: this.hour,
+      minute: this.minute,
+      second: this.second,
+      totalSeconds: this.totalSeconds,
+      timeScale: this.timeScale,
+      isPaused: this.isPaused,
+      season: 'SPRING',
+      year: 1
+    };
+  }
+
+  loadSaveData(data: any): void {
+    if (!data) return;
+    try {
+      this.day = typeof data.day === 'number' ? data.day : 1;
+      this.hour = typeof data.hour === 'number' ? Math.max(0, Math.min(data.hour, 23)) : 6;
+      this.minute = typeof data.minute === 'number' ? Math.max(0, Math.min(data.minute, 59)) : 0;
+      this.second = typeof data.second === 'number' ? Math.max(0, Math.min(data.second, 59)) : 0;
+      this.totalSeconds = typeof data.totalSeconds === 'number' ? data.totalSeconds : (this.day - 1) * this.dayDurationSeconds + this.hour * 3600 + this.minute * 60 + this.second;
+      this.timeScale = typeof data.timeScale === 'number' ? data.timeScale : 60;
+      this.isPaused = typeof data.isPaused === 'boolean' ? data.isPaused : false;
+      this.lastPhase = this.calculatePhase(this.hour);
+      console.log(`[TimeManager] Loaded save: Day ${this.day} ${this.formatTime()} scale ${this.timeScale}x`);
+    } catch (e) {
+      console.error('[TimeManager] Failed to load save data:', e);
+    }
+  }
 }
