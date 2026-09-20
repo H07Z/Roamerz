@@ -845,18 +845,12 @@ export class Game {
 
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
-    if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f1') || this.input.isKeyJustPressed('f3') || this.input.isKeyJustPressed('f2')) {
+    // FIX: Removed D key for debug (overlaps WASD movement). Now only ` and F2 toggle debug.
+    if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
     }
 
-    if (this.input.isKeyJustPressed('d')) {
-      const onlyD = this.input.isKeyDown('d') && !this.input.isKeyDown('a') && !this.input.isKeyDown('w') && !this.input.isKeyDown('s') && !this.input.isKeyDown('arrowup') && !this.input.isKeyDown('arrowdown') && !this.input.isKeyDown('arrowleft') && !this.input.isKeyDown('arrowright');
-      if (onlyD || this.input.isKeyDown('shift')) {
-        this.debug.setEnabled(!this.debug.isEnabled());
-      }
-    }
-
-    if (this.input.isKeyJustPressed('r')) {
+    if (this.input.isKeyJustPressed('r') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       (this.debug as any).gameTimeSeconds = 0;
       if (this.player) {
         const tileSize = WorldRenderer.TILE_SIZE;
@@ -1080,14 +1074,14 @@ export class Game {
       this.player.setPosition(15*32+16, 30*32+16);
     }
 
-    // Map jump shortcuts for Phase 12 testing
+    // Map jump shortcuts for Phase 12 testing - FIX: F2 is debug, so use F1/F3/F4 for maps
     if (this.input.isKeyJustPressed('f1') && !this.dialogueManager.isOpen()) {
       this.switchMap('village_01', 'north');
     }
-    if (this.input.isKeyJustPressed('f2') && !this.dialogueManager.isOpen()) {
+    if (this.input.isKeyJustPressed('f3') && !this.dialogueManager.isOpen()) {
       this.switchMap('forest_01', 'north');
     }
-    if (this.input.isKeyJustPressed('f3') && !this.dialogueManager.isOpen()) {
+    if (this.input.isKeyJustPressed('f4') && !this.dialogueManager.isOpen()) {
       this.switchMap('lake_01', 'north');
     }
 
@@ -1588,7 +1582,7 @@ export class Game {
       '  Shift+M - Toggle full map (400x400 overlay)',
       '  Shift+R - Reveal all current map, Ctrl+R - Reset exploration',
       '  Shift+[ / Shift+] - Decrease/Increase vision radius',
-      '  F1/F2/F3 - Jump to village/forest/lake (test)',
+      '  F1/F3/F4 - Jump to village/forest/lake (test) - F2 is debug toggle',
       '  Walk to map edge (road at N/S/E/W) to travel between maps',
       '  T - Run all tests (7+8+9+10+11+12), P - Print all states',
       'Tests: 5 nearby, 6 around building, 7 bridge, 8 blocked, 9 no path (dialogue closed)',
