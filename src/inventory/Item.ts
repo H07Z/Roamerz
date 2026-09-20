@@ -70,6 +70,16 @@ export enum ItemType {
   ANIMAL_FEED = 'animal_feed',
   TRUFFLE = 'truffle',
 
+  // Cooked foods (Phase 16.3)
+  FRIED_EGG = 'fried_egg',
+  OMELETTE = 'omelette',
+  CHEESE = 'cheese',
+  CAKE = 'cake',
+  SOUP = 'soup',
+  STEW = 'stew',
+  PANCAKE = 'pancake',
+  SALAD = 'salad',
+
   // Misc
   FLOWER = 'flower',
   FEATHER = 'feather'

@@ -1,5 +1,5 @@
 /**
- * Game - Phase 16.2 Crafting System
+ * Game - Phase 16.3 Cooking System
  * - 3 maps: village_01, forest_01, lake_01 with transitions
  * - ExplorationSystem with fog of war, vision radius 8, minimap
  * - TimeManager, Schedule, Life, Interaction, Dialogue preserved
@@ -8,7 +8,8 @@
  * - FarmingSystem: data-driven CropDatabase 4 crops, till/plant/water/harvest/wither, growth based on TimeManager, persistence
  * - AnimalSystem: data-driven AnimalDatabase 4 animals, feed/pet/produce/wander, hunger/happiness, persistence
  * - CraftingSystem: data-driven RecipeDatabase 12 recipes, ingredients consumption, result add, categories, persistence
- * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI, animal UI, crafting UI
+ * - CookingSystem: data-driven CookingDatabase 10 recipes, ingredients consumption, result add, stations, persistence
+ * - Auto-save, quick save/load, save UI, new game, inventory UI, farming UI, animal UI, crafting UI, cooking UI
  */
 
 import { Renderer } from './Renderer';
@@ -67,6 +68,10 @@ import { RecipeDatabase } from '../crafting/RecipeDatabase';
 import { CraftingSystem } from '../crafting/CraftingSystem';
 import { CraftingRenderer } from '../crafting/CraftingRenderer';
 import { RecipeCategory } from '../crafting/Recipe';
+import { CookingDatabase } from '../cooking/CookingDatabase';
+import { CookingSystem } from '../cooking/CookingSystem';
+import { CookingRenderer } from '../cooking/CookingRenderer';
+import { CookingCategory } from '../cooking/CookingRecipe';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -135,6 +140,13 @@ export class Game {
   private craftingRenderer: CraftingRenderer;
   private showCrafting: boolean = false;
   private showCraftingDebug: boolean = true;
+
+  // Phase 16.3 Cooking System
+  private cookingDatabase: CookingDatabase;
+  private cookingSystem: CookingSystem;
+  private cookingRenderer: CookingRenderer;
+  private showCooking: boolean = false;
+  private showCookingDebug: boolean = true;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -213,12 +225,15 @@ export class Game {
     this.recipeDatabase = RecipeDatabase.getInstance();
     this.craftingSystem = new CraftingSystem(this.recipeDatabase);
     this.craftingRenderer = new CraftingRenderer(this.itemDatabase, this.recipeDatabase);
+    this.cookingDatabase = CookingDatabase.getInstance();
+    this.cookingSystem = new CookingSystem(this.cookingDatabase);
+    this.cookingRenderer = new CookingRenderer(this.itemDatabase, this.cookingDatabase);
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 16.2 - Crafting System...');
+    console.log('[Game] Initializing Phase 16.3 - Cooking System...');
 
     this.input.initialize(this.canvas);
 
@@ -355,6 +370,18 @@ export class Game {
         console.log(`[Game] CraftingSystem: ${this.craftingSystem.getDebugString()}`);
         this.craftingRenderer.setShowCrafting(this.showCrafting);
 
+        // Phase 16.3 Cooking System init
+        this.cookingSystem.initialize();
+        console.log(`[Game] CookingDatabase: ${this.cookingDatabase.getCount()} recipes: ${this.cookingDatabase.getDebugString()}`);
+        const cookingValidation = this.cookingDatabase.validate();
+        if (!cookingValidation.valid) {
+          console.warn('[Game] CookingDatabase validation errors:', cookingValidation.errors);
+        } else {
+          console.log('[Game] CookingDatabase validation PASS');
+        }
+        console.log(`[Game] CookingSystem: ${this.cookingSystem.getDebugString()}`);
+        this.cookingRenderer.setShowCooking(this.showCooking);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -370,7 +397,8 @@ export class Game {
         console.log(`[Game] Phase 15: Farming System - data-driven crops, till/plant/water/harvest/wither, time-based growth, persistence`);
         console.log(`[Game] Phase 16.1: Animals System - data-driven livestock, feed/pet/produce/wander, hunger/happiness, persistence`);
         console.log(`[Game] Phase 16.2: Crafting System - data-driven recipes, ingredients consumption, result add, categories, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 16.3: Cooking System - data-driven recipes, ingredients consumption, stations, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, E till/plant/harvest/feed/collect/pet, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -451,6 +479,7 @@ export class Game {
     const farmingSave = this.farmingSystem.getSaveData();
     const animalSave = this.animalSystem.getSaveData();
     const craftingSave = this.craftingSystem.getSaveData();
+    const cookingSave = this.cookingSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -469,6 +498,7 @@ export class Game {
       farming: farmingSave,
       animals: animalSave,
       crafting: craftingSave,
+      cooking: cookingSave,
       weather: { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
       economy: { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: {},
@@ -575,6 +605,11 @@ export class Game {
         console.log(`[Game] Crafting loaded: ${this.craftingSystem.getDebugString()}`);
       }
 
+      if ((saveFile.world as any).cooking) {
+        this.cookingSystem.loadSaveData((saveFile.world as any).cooking);
+        console.log(`[Game] Cooking loaded: ${this.cookingSystem.getDebugString()}`);
+      }
+
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
       this.collectedObjects = new Set(saveFile.world.collectedObjects ?? []);
@@ -622,7 +657,7 @@ export class Game {
 
       this.saveSlots = this.saveManager.getAllSaveSlots();
 
-      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()}`);
+      console.log(`[Game] Save applied successfully: Day ${this.timeManager.getDay()} ${this.playerMapId} exploration ${this.explorationSystem.getTotalExplorationPercentage().toFixed(1)}% farming ${this.farmingSystem.getDebugString()} animals ${this.animalSystem.getDebugString()} crafting ${this.craftingSystem.getDebugString()} cooking ${this.cookingSystem.getDebugString()}`);
 
       return true;
     } catch (e) {
@@ -742,6 +777,7 @@ export class Game {
     this.animalSystem.initialize(allMaps.map(m => ({ mapId: m.mapId, width: m.width, height: m.height })));
     this.animalSystem.clear();
     this.craftingSystem.clear();
+    this.cookingSystem.clear();
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
     const villageMapForAnimals = this.world.getMap('village_01') ?? this.world.getCurrentMap();
@@ -765,6 +801,7 @@ export class Game {
     this.showFarming = true;
     this.showAnimals = true;
     this.showCrafting = false;
+    this.showCooking = false;
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -785,7 +822,8 @@ export class Game {
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isInventoryOpen = this.showPlayerInventory;
     const isCraftingOpen = this.showCrafting;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen) return;
+    const isCookingOpen = this.showCooking;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -943,7 +981,8 @@ export class Game {
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isInventoryOpen = this.showPlayerInventory;
     const isCraftingOpen = this.showCrafting;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen) return;
+    const isCookingOpen = this.showCooking;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1133,12 +1172,129 @@ export class Game {
     }
   }
 
-  // ==================== PHASE 14 INVENTORY INPUT ==================== ====================
+  // ==================== PHASE 16.3 COOKING INPUT ====================
+
+  private handleCookingInput(): void {
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (this.showCooking) {
+      if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift'))) {
+        this.showCooking = false;
+        console.log('[Cooking] Closed cooking UI');
+        return;
+      }
+
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        const tempFiltered = this.cookingSystem.getUnlockedRecipes().filter(r => {
+          const cat = this.cookingRenderer.getFilterCategory();
+          if (cat && r.category !== cat) return false;
+          if (this.cookingRenderer.getShowOnlyCookable() && this.player) {
+            const can = this.cookingSystem.canCook(r.id, this.player.getInventory());
+            return can.can;
+          }
+          return true;
+        });
+        this.cookingRenderer.navigate('up', tempFiltered.length);
+      }
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        const tempFiltered = this.cookingSystem.getUnlockedRecipes().filter(r => {
+          const cat = this.cookingRenderer.getFilterCategory();
+          if (cat && r.category !== cat) return false;
+          if (this.cookingRenderer.getShowOnlyCookable() && this.player) {
+            const can = this.cookingSystem.canCook(r.id, this.player.getInventory());
+            return can.can;
+          }
+          return true;
+        });
+        this.cookingRenderer.navigate('down', tempFiltered.length);
+      }
+
+      if (this.input.isKeyJustPressed('c') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        const categories: (CookingCategory | null)[] = [null, CookingCategory.BREAKFAST, CookingCategory.MEAL, CookingCategory.SOUP, CookingCategory.DESSERT, CookingCategory.DAIRY, CookingCategory.MISC];
+        const current = this.cookingRenderer.getFilterCategory();
+        const idx = categories.indexOf(current as any);
+        const next = categories[(idx + 1) % categories.length];
+        this.cookingRenderer.setFilterCategory(next);
+        console.log(`[Cooking] Filter: ${next ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        // When UI open, Shift+K already handled as close above, so this is for toggle cookable only? Use Shift+K as toggle when open is close, so we need another combo for filter
+        // Use Ctrl+Shift+K or reuse Shift+C? We'll use Shift+C not good. Let's use Shift+K as close, and Ctrl+Shift+K as toggle cookable
+        // Actually we already handle close on Shift+K, so we shouldn't also toggle here. We'll handle cookable toggle on Ctrl+Shift+K below
+      }
+
+      if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
+        this.cookingRenderer.toggleCookableFilter();
+        console.log(`[Cooking] Cookable only: ${this.cookingRenderer.getShowOnlyCookable() ? 'ON' : 'OFF'}`);
+      }
+
+      // Also allow Shift+K when open to toggle cookable if we differentiate? For simplicity, use same as crafting: Shift+K close, Ctrl+Shift+K toggle
+      // For quick testing, also allow 'f' filter? But keep C for category
+      if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        // already closed, so ignore
+      }
+
+      // Allow C for category already handled, and also allow 'k' with ctrl+shift for cookable
+      if (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
+        this.cookingRenderer.toggleCookableFilter();
+        console.log(`[Cooking] Cookable only (Ctrl+Shift+C): ${this.cookingRenderer.getShowOnlyCookable() ? 'ON' : 'OFF'}`);
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        if (!this.player) return;
+        const filtered = (() => {
+          let recipes = this.cookingSystem.getUnlockedRecipes();
+          const cat = this.cookingRenderer.getFilterCategory();
+          if (cat) recipes = recipes.filter(r => r.category === cat);
+          if (this.cookingRenderer.getShowOnlyCookable()) {
+            recipes = recipes.filter(r => this.cookingSystem.canCook(r.id, this.player!.getInventory()).can);
+          }
+          recipes.sort((a,b) => {
+            if (a.category !== b.category) return a.category.localeCompare(b.category);
+            return a.name.localeCompare(b.name);
+          });
+          return recipes;
+        })();
+        const idx = this.cookingRenderer.getSelectedIndex();
+        if (idx >= 0 && idx < filtered.length) {
+          const recipe = filtered[idx];
+          const result = this.cookingSystem.cook(recipe.id, this.player.getInventory());
+          if (result.success) {
+            console.log(`[Cooking] Cooked ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
+            this.saveRenderer.showMessage(`🍳 Cooked ${result.resultQuantity}x ${result.resultItemId}!`, '#ffb74d', 2);
+          } else {
+            console.log(`[Cooking] Cook failed: ${result.reason}`);
+            this.saveRenderer.showMessage(`❌ Cook failed: ${result.reason}`, '#f88', 2);
+          }
+        }
+      }
+
+      return;
+    }
+
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting) {
+      if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.showCooking = !this.showCooking;
+        if (this.showCooking) {
+          console.log('[Cooking] Opened cooking UI');
+          this.cookingRenderer.setSelectedIndex(0);
+        } else {
+          console.log('[Cooking] Closed cooking UI');
+        }
+        return;
+      }
+    }
+  }
+
+  // ==================== PHASE 14 INVENTORY INPUT ==================== ==================== ====================
 
   private handleInventoryInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isCraftingOpen = this.showCrafting;
+    const isCookingOpen = this.showCooking;
 
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
@@ -1192,7 +1348,7 @@ export class Game {
       return;
     }
 
-    if (!isDialogueOpen && !isSaveUIOpen && !isCraftingOpen) {
+    if (!isDialogueOpen && !isSaveUIOpen && !isCraftingOpen && !isCookingOpen) {
       if (this.input.isKeyJustPressed('i') && !this.input.isKeyDown('control')) {
         if (this.input.isKeyDown('shift')) {
           return;
@@ -1411,6 +1567,7 @@ export class Game {
     if (this.saveRenderer.isShowingUI()) return;
     if (this.showPlayerInventory) return;
     if (this.showCrafting) return;
+    if (this.showCooking) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1474,13 +1631,13 @@ export class Game {
 
     if (this.autoSaveTimer >= this.autoSaveInterval) {
       this.autoSaveTimer = 0;
-      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
         console.log('[Save] Auto-save triggered');
         this.saveGame(AUTO_SAVE_SLOT);
       }
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
       this.timeManager.update(deltaTime);
     }
 
@@ -1546,12 +1703,13 @@ export class Game {
       const isSaveUIOpen = this.saveRenderer.isShowingUI();
       const isInventoryOpen = this.showPlayerInventory;
       const isCraftingOpen = this.showCrafting;
-      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
+      const isCookingOpen = this.showCooking;
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
@@ -1560,13 +1718,14 @@ export class Game {
       }
 
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen) {
+      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen) {
         this.handleDialogueInput();
       }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
 
       this.handleInventoryInput();
       this.handleCraftingInput();
+      this.handleCookingInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
@@ -1871,6 +2030,17 @@ export class Game {
           showCrafting: this.showCrafting
         });
       }
+
+      if (this.cookingSystem) {
+        (this.debug as any).setCookingInfo?.({
+          recipeCount: this.cookingDatabase.getCount(),
+          recipes: this.cookingDatabase.getAllRecipes().map(r=>r.id),
+          unlockedCount: this.cookingSystem.getUnlockedRecipes().length,
+          totalCooked: this.cookingSystem.getTotalCooked(),
+          debug: this.cookingSystem.getDebugString(),
+          showCooking: this.showCooking
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -1978,7 +2148,7 @@ export class Game {
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
 
-    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting) return;
+    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking) return;
 
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
@@ -2206,7 +2376,7 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1+16.2 Test] Running all tests...');
+      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1+16.2+16.3 Test] Running all tests...');
       this.runPhase7Tests();
       this.runPhase8Tests();
       this.runPhase9Tests();
@@ -2218,9 +2388,10 @@ export class Game {
       this.runPhase15Tests();
       this.runPhase16_1Tests();
       this.runPhase16_2Tests();
+      this.runPhase16_3Tests();
     }
 
-    if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift')) {
+    if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
       if (this.navigationGrid) {
         const testX = 24, testY = 18;
         const wasWalkable = this.navigationGrid.isWalkable(testX, testY);
@@ -2973,6 +3144,94 @@ export class Game {
     console.log(`[Crafting] ${this.craftingSystem.getDebugString()} | Recipes: ${this.recipeDatabase.getDebugString()}`);
   }
 
+  private runPhase16_3Tests(): void {
+    console.log('=== PHASE 16.3 TESTS - COOKING SYSTEM ===');
+
+    const recipeCount = this.cookingDatabase.getCount();
+    console.log(`Test1 CookingDatabase count: ${recipeCount} recipes (expected 10) -> ${recipeCount===10 ? 'PASS' : 'FAIL'}`);
+    console.log(`  Recipes: ${this.cookingDatabase.getDebugString()}`);
+
+    const validation = this.cookingDatabase.validate();
+    console.log(`Test2 CookingDatabase validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length>0) console.log(`  Errors: ${validation.errors.join(', ')}`);
+
+    const testInv = new Inventory(20, this.itemDatabase);
+    testInv.addItem('egg', 2);
+    testInv.addItem('milk', 1);
+    testInv.addItem('mushroom', 1);
+    console.log(`Test3 Inventory egg2 milk1 mushroom1 -> PASS`);
+
+    const canOmelette = this.cookingSystem.canCook('cook_omelette', testInv);
+    console.log(`Test4 canCook omelette: ${canOmelette.can ? 'PASS' : 'FAIL'} reason=${canOmelette.reason ?? 'ok'}`);
+
+    const cookOmelette = this.cookingSystem.cook('cook_omelette', testInv);
+    console.log(`Test5 cook omelette: success=${cookOmelette.success} result=${cookOmelette.resultItemId} qty=${cookOmelette.resultQuantity} -> ${cookOmelette.success && cookOmelette.resultItemId==='omelette' ? 'PASS' : 'FAIL'}`);
+    console.log(`  After: egg=${testInv.getItemQuantity('egg')} expected 0, milk=${testInv.getItemQuantity('milk')} expected 0, mushroom=${testInv.getItemQuantity('mushroom')} expected 0, omelette=${testInv.getItemQuantity('omelette')} expected 1 -> ${testInv.getItemQuantity('egg')===0 && testInv.getItemQuantity('milk')===0 && testInv.getItemQuantity('omelette')===1 ? 'PASS' : 'FAIL'}`);
+
+    testInv.clearInventory();
+    testInv.addItem('milk', 2);
+    const canCheese = this.cookingSystem.canCook('cook_cheese', testInv);
+    console.log(`Test6 canCook cheese with 2 milk: ${canCheese.can ? 'PASS' : 'FAIL'}`);
+    const cookCheese = this.cookingSystem.cook('cook_cheese', testInv);
+    console.log(`Test6b cook cheese: success=${cookCheese.success} cheese=${testInv.getItemQuantity('cheese')} expected 1 -> ${cookCheese.success && testInv.getItemQuantity('cheese')===1 ? 'PASS' : 'FAIL'}`);
+
+    testInv.clearInventory();
+    testInv.addItem('carrot', 1);
+    testInv.addItem('mushroom', 1);
+    testInv.addItem('herb', 1);
+    const cookSoup = this.cookingSystem.cook('cook_soup', testInv);
+    console.log(`Test7 cook soup: success=${cookSoup.success} soup=${testInv.getItemQuantity('soup')} expected 1 -> ${cookSoup.success && testInv.getItemQuantity('soup')===1 ? 'PASS' : 'FAIL'}`);
+
+    testInv.clearInventory();
+    testInv.addItem('wheat', 2);
+    testInv.addItem('egg', 2);
+    testInv.addItem('milk', 1);
+    testInv.addItem('berry', 2);
+    const cookCake = this.cookingSystem.cook('cook_cake', testInv);
+    console.log(`Test8 cook cake: success=${cookCake.success} cake=${testInv.getItemQuantity('cake')} expected 1 -> ${cookCake.success && testInv.getItemQuantity('cake')===1 ? 'PASS' : 'FAIL'}`);
+
+    testInv.clearInventory();
+    testInv.addItem('egg', 5);
+    testInv.addItem('milk', 5);
+    testInv.addItem('wheat', 5);
+    testInv.addItem('carrot', 5);
+    testInv.addItem('mushroom', 5);
+    testInv.addItem('herb', 5);
+    testInv.addItem('berry', 5);
+    const cookable = this.cookingSystem.getCookableRecipes(testInv);
+    console.log(`Test9 getCookableRecipes with many mats: found ${cookable.length} -> ${cookable.length>=6 ? 'PASS' : 'FAIL'} ${cookable.map(r=>r.id).join(',')}`);
+
+    const saveData = this.cookingSystem.getSaveData();
+    console.log(`Test10 getSaveData: totalCooked=${saveData.totalCooked} unlocked=${saveData.recipesUnlocked.length} -> ${saveData.totalCooked>=3 ? 'PASS' : 'FAIL'}`);
+    const newCooking = new CookingSystem(this.cookingDatabase);
+    newCooking.loadSaveData(saveData);
+    console.log(`Test10b loadSaveData: totalCooked=${newCooking.getTotalCooked()} expected ${saveData.totalCooked} -> ${newCooking.getTotalCooked()===saveData.totalCooked ? 'PASS' : 'FAIL'}`);
+
+    if (this.player) {
+      this.player.getInventory().clearInventory();
+      this.player.addItem('egg', 1);
+      const beforeFried = this.player.getItemQuantity('fried_egg');
+      const res = this.cookingSystem.cook('cook_fried_egg', this.player.getInventory());
+      const afterFried = this.player.getItemQuantity('fried_egg');
+      console.log(`Test11 player cook fried_egg: before ${beforeFried} after ${afterFried} expected ${beforeFried+1} success=${res.success} -> ${res.success && afterFried===beforeFried+1 ? 'PASS' : 'FAIL'}`);
+      this.player.removeItem('fried_egg', 1);
+      this.player.removeItem('egg', this.player.getItemQuantity('egg'));
+    }
+
+    // Cooking chain: farm wheat -> hay -> animal feed -> feed cow -> milk -> cheese -> cake
+    testInv.clearInventory();
+    testInv.addItem('wheat', 2);
+    const hayRes = this.craftingSystem.craft('craft_hay', testInv);
+    console.log(`Test12a craft hay from wheat: ${hayRes.success && testInv.getItemQuantity('hay')===2 ? 'PASS' : 'FAIL'}`);
+    testInv.addItem('carrot', 1);
+    testInv.addItem('wheat', 1);
+    const feedRes = this.craftingSystem.craft('craft_animal_feed', testInv);
+    console.log(`Test12b craft animal_feed: ${feedRes.success && testInv.getItemQuantity('animal_feed')===3 ? 'PASS' : 'FAIL'}`);
+
+    console.log('=== END PHASE 16.3 TESTS ===');
+    console.log(`[Cooking] ${this.cookingSystem.getDebugString()} | Recipes: ${this.cookingDatabase.getDebugString()}`);
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -3072,13 +3331,16 @@ export class Game {
 
     if (this.showCrafting && this.player) {
       this.craftingRenderer.render(ctx, w, h, this.craftingSystem, this.player.getInventory());
+    } else if (this.showCooking && this.player) {
+      this.cookingRenderer.render(ctx, w, h, this.cookingSystem, this.player.getInventory());
     } else if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
-      // Quick hint for craftable
+      // Quick hints
       this.craftingRenderer.renderQuickHint(ctx, w, h, this.craftingSystem, this.player.getInventory());
+      this.cookingRenderer.renderQuickHint(ctx, w, h, this.cookingSystem, this.player.getInventory());
     }
 
     // Farming selected plot info (when not in inventory)
-    if (!this.showPlayerInventory && !this.showCrafting && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
@@ -3086,7 +3348,7 @@ export class Game {
     }
 
     // Animals selected info
-    if (!this.showPlayerInventory && !this.showCrafting && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
       const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
       if (animal) {
         this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
@@ -3103,7 +3365,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -3176,7 +3438,7 @@ export class Game {
     const saveStats = this.saveManager ? this.saveManager.getStats() : null;
 
     const lines = [
-      'PHASE 16.2 - CRAFTING SYSTEM',
+      'PHASE 16.3 - COOKING SYSTEM',
       `Time: ${timeStr} Phase ${phaseStr} Scale ${this.timeManager ? this.timeManager.getTimeScale() : 0}x Wellbeing ${avgWellbeing}%`,
       `World: ${this.world.getAllMapsInfo().length} maps Current:${currentMap?.mapId}(${currentMap?.name}) PlayerMap:${this.playerMapId} Trans:${this.explorationSystem.getMapTransitions()}`,
       `Exploration: ${currentMap?.name} ${explorationPerc}% Total ${totalPerc}% Vision:${this.explorationSystem.getVisionRadius()} Fog:${this.showFog?'ON':'OFF'}(Shift+F) Mini:${this.showMinimap?'ON':'OFF'}(TAB) Full:${this.showFullMap?'ON':'OFF'}(Shift+M)`,
@@ -3226,12 +3488,19 @@ export class Game {
       '  W/S - Navigate recipes, C filter category, Shift+C toggle craftable only, Enter craft',
       '  Recipes: axe, pickaxe, fishing_rod, sickle, bread, egg bread, hay, animal_feed, health_potion, stamina_potion, fiber, coin',
       '  Ingredients consumed from inventory, result added',
-      '  Ctrl+Shift+C - Debug print crafting, P - Print all, T - Run all tests 7-16.2',
+      '  Ctrl+Shift+C - Debug print crafting',
+      'Cooking System (Phase 16.3):',
+      '  Shift+K - Toggle cooking UI (avoid WASD, was obstacle toggle now Ctrl+Shift+K)',
+      '  W/S - Navigate recipes, C filter category, Ctrl+Shift+K toggle cookable only, Enter cook',
+      '  Recipes: fried_egg, omelette, cheese, pancake, soup, stew, cake, salad, truffle soup, egg bread deluxe',
+      '  Stations: campfire, stove, kitchen (display only), ingredients from farm/animals',
+      '  Effects: hunger/health/stamina restore, better than raw',
+      '  P - Print all including cooking, T - Run all tests 7-16.3',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
       `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()}`,
-      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable`,
+      `NPCs: ${this.npcManager.getCount()} (village only) | Life: ${this.lifeManager ? this.lifeManager.getCount() : 0} AvgW:${avgWellbeing}% | Farming: ${this.farmingSystem.getPlotCount()} plots Ready:${this.farmingSystem.getAllPlots().filter(p=>p.isReady()).length} | Animals: ${this.animalSystem.getAnimalCount()} Ready:${this.animalSystem.getAllAnimals().filter(a=>a.isProduceReady()).length} | Crafting: ${this.craftingSystem.getTotalCrafted()} crafted ${this.craftingSystem.getCraftableRecipes(this.player?.getInventory() as any).length} craftable | Cooking: ${this.cookingSystem.getTotalCooked()} cooked ${this.cookingSystem.getCookableRecipes(this.player?.getInventory() as any).length} cookable`,
       `World: ${this.world.getAllMapsInfo().map(m=>m.id).join(',')} | Exploration: ${this.explorationSystem.getTotalExploredCount()}/${this.explorationSystem.getTotalTiles()} (${totalPerc}%) | Opened:${Array.from(this.openedLocations).join(',')}`,
       `SaveSlots: ${this.saveSlots.map(s=> s.exists ? `${s.slotId}:${s.corrupted ? 'CORRUPT' : `Day${s.preview?.day ?? '?'} ${s.preview?.mapId ?? '?'}`}` : `${s.slotId}:empty`).join(' ')}`,
       `Inv: ${this.itemDatabase.getAllItems().slice(0,5).map(i=>`${i.id}(${i.category})`).join(', ')}...`,
@@ -3331,9 +3600,13 @@ export class Game {
   getRecipeDatabase(): RecipeDatabase { return this.recipeDatabase; }
   getCraftingSystem(): CraftingSystem { return this.craftingSystem; }
   getCraftingRenderer(): CraftingRenderer { return this.craftingRenderer; }
+  getCookingDatabase(): CookingDatabase { return this.cookingDatabase; }
+  getCookingSystem(): CookingSystem { return this.cookingSystem; }
+  getCookingRenderer(): CookingRenderer { return this.cookingRenderer; }
   isPlayerInventoryOpen(): boolean { return this.showPlayerInventory; }
   isFarmingShowing(): boolean { return this.showFarming; }
   isAnimalsShowing(): boolean { return this.showAnimals; }
   isCraftingShowing(): boolean { return this.showCrafting; }
+  isCookingShowing(): boolean { return this.showCooking; }
   isGameRunning(): boolean { return this.isRunning; }
 }

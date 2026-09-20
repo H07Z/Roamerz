@@ -418,6 +418,7 @@ export class SaveManager {
       // future placeholders
       farming: saveFile.player.farming ?? {},
       crafting: saveFile.player.crafting ?? {},
+      cooking: (saveFile.player as any).cooking ?? {},
       equipment: saveFile.player.equipment ?? {},
       combat: saveFile.player.combat ?? {}
     };
@@ -444,6 +445,7 @@ export class SaveManager {
       farming: saveFile.world.farming ?? { plots: {}, totalPlotsCreated: 0, totalHarvested: 0, totalPlanted: 0, version: 2 },
       animals: saveFile.world.animals ?? { animals: {}, totalCreated: 0, totalCollected: 0, totalFed: 0, totalPetted: 0, version: 2 },
       crafting: saveFile.world.crafting ?? { recipesUnlocked: [], totalCrafted: 0, craftedCounts: {}, version: 1 },
+      cooking: (saveFile.world as any).cooking ?? { recipesUnlocked: [], totalCooked: 0, cookedCounts: {}, version: 1 },
       weather: saveFile.world.weather ?? { current: 'SUNNY', intensity: 0, nextChange: 0, version: 1 },
       economy: saveFile.world.economy ?? { shopInventories: {}, prices: {}, transactionHistory: [], version: 1 },
       dungeons: saveFile.world.dungeons ?? {},
