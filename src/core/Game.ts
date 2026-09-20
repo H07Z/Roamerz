@@ -1,11 +1,7 @@
 /**
- * Game - Phase 4
- * Core game class with Collision System
- * - World Map
- * - Player Movement with collision
- * - Collision types: WALKABLE, BLOCKED, INTERACTABLE
- * - Prevents walking through trees, rocks, water, houses
- * - Bridge remains walkable
+ * Game - Phase 5 + 6
+ * Phase 5: Camera System (follow, boundaries, clamping, smooth, zoom)
+ * Phase 6: NPC Foundation (5 NPCs, IDLE/WALK, movement between points)
  */
 
 import { Renderer } from './Renderer';
@@ -16,7 +12,9 @@ import { WorldRenderer } from '../world/WorldRenderer';
 import { Player } from '../player/Player';
 import { PlayerRenderer } from '../player/PlayerRenderer';
 import { CollisionSystem } from '../collision/CollisionSystem';
-import { CollisionType } from '../collision/CollisionType';
+import { Camera } from '../camera/Camera';
+import { NPCManager } from '../npc/NPCManager';
+import { NPCRenderer } from '../npc/NPCRenderer';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -28,6 +26,9 @@ export class Game {
   private player: Player | null = null;
   private playerRenderer: PlayerRenderer;
   private collisionSystem: CollisionSystem;
+  private camera: Camera;
+  private npcManager: NPCManager;
+  private npcRenderer: NPCRenderer;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -38,6 +39,7 @@ export class Game {
   private boundResizeHandler: () => void;
 
   private showHelp: boolean = true;
+  private showNPCPaths: boolean = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -48,12 +50,15 @@ export class Game {
     this.worldRenderer = new WorldRenderer();
     this.playerRenderer = new PlayerRenderer();
     this.collisionSystem = new CollisionSystem();
+    this.camera = new Camera({ smoothing: 5.0, zoom: 1.0, deadZone: 0 });
+    this.npcManager = new NPCManager();
+    this.npcRenderer = new NPCRenderer();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 4 - Collision System...');
+    console.log('[Game] Initializing Phase 5+6 - Camera + NPC Foundation...');
 
     this.input.initialize(this.canvas);
 
@@ -61,45 +66,45 @@ export class Game {
       this.world.initialize();
       const map = this.world.getCurrentMap();
       if (map) {
-        console.log(`[Game] World map loaded: ${map.mapId} - ${map.name}`);
+        console.log(`[Game] World map: ${map.mapId} - ${map.name}`);
 
-        // Initialize collision system from world map (Phase 4)
         this.collisionSystem.initializeFromWorldMap(map);
-        console.log(`[Game] Collision map generated:`, this.collisionSystem.getCollisionMap()?.getCounts());
+        console.log(`[Game] Collision:`, this.collisionSystem.getCollisionMap()?.getCounts());
 
-        // Initialize player at village square
+        this.camera.setWorldMap(map);
+
         const tileSize = WorldRenderer.TILE_SIZE;
         const startX = 25 * tileSize + tileSize / 2;
         const startY = 20 * tileSize + tileSize / 2;
         this.player = new Player(startX, startY, 150);
 
-        console.log(`[Game] Player created at (${startX}, ${startY})`);
-        console.log(`[Game] Collision: GRASS/ROAD/BRIDGE/FARMLAND=WALKABLE, WATER/TREE/ROCK/HOUSE=BLOCKED, Door=INTERACTABLE`);
+        // Initialize NPCs (Phase 6)
+        this.npcManager.initialize(map);
+        console.log(`[Game] NPCs: ${this.npcManager.getCount()} created`);
+
+        console.log(`[Game] Camera: smoothing=${this.camera.getSmoothing()}, zoom=${this.camera.getZoom()}`);
+        console.log(`[Game] Player at ${startX},${startY}, NPCs moving between points`);
       }
     } catch (e) {
-      console.error('[Game] Initialization failed:', e);
+      console.error('[Game] Init failed:', e);
     }
 
     window.addEventListener('resize', this.boundResizeHandler);
 
     if ('ResizeObserver' in window) {
-      this.resizeObserver = new ResizeObserver(() => {
-        this.handleResize();
-      });
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
       const container = this.canvas.parentElement;
-      if (container) {
-        this.resizeObserver.observe(container);
-      }
+      if (container) this.resizeObserver.observe(container);
     }
 
     this.handleResize();
-    this.centerOnPlayer();
+    this.camera.centerOn(this.player?.x ?? 25 * 32, this.player?.y ?? 20 * 32);
 
     const loading = document.getElementById('loading');
     if (loading) loading.style.display = 'none';
 
     console.log('[Game] Initialized. Screen:', this.renderer.getWidth(), 'x', this.renderer.getHeight());
-    console.log('[Game] Phase 4 Controls: WASD/Arrows move, K toggle collision debug, C center, G grid');
+    console.log('[Game] Phase 5: Camera follow, clamp, smooth, zoom | Phase 6: 5 NPCs IDLE/WALK A↔B');
   }
 
   start(): void {
@@ -107,7 +112,6 @@ export class Game {
     this.isRunning = true;
     this.lastFrameTime = performance.now();
     this.accumulatedTime = 0;
-    console.log('[Game] Starting game loop...');
     this.animationFrameId = requestAnimationFrame(this.gameLoop);
   }
 
@@ -142,12 +146,19 @@ export class Game {
     this.worldRenderer.update(deltaTime);
 
     const map = this.world.getCurrentMap();
+
+    // Update player
     if (this.player && map) {
-      // Update player with collision system (Phase 4)
       this.player.update(deltaTime, this.input, map, this.collisionSystem);
       this.playerRenderer.update(deltaTime, this.player);
 
-      this.updateCameraFollow();
+      // Camera follow player (Phase 5)
+      this.camera.follow(this.player.x, this.player.y);
+      this.camera.update(deltaTime);
+
+      // Sync WorldRenderer offset from Camera (preserve previous functionality)
+      const camOffset = this.camera.getOffset();
+      this.worldRenderer.setOffset(camOffset.x, camOffset.y);
 
       this.debug.setPlayerInfo({
         x: this.player.x,
@@ -163,7 +174,6 @@ export class Game {
       const boundary = this.player.isAtBoundary(map);
       this.debug.setPlayerAtBoundary(boundary.atBoundary, boundary.side);
 
-      // Collision debug info
       const collisionMap = this.collisionSystem.getCollisionMap();
       if (collisionMap) {
         this.debug.setCollisionInfo({
@@ -172,12 +182,32 @@ export class Game {
           lastCollision: this.player.getLastCollision(),
           showCollision: this.collisionSystem.isShowCollision()
         });
-
-        // Check current tile collision type
         const tilePos = this.player.getTilePosition();
-        const collType = collisionMap.getCollisionType(tilePos.x, tilePos.y);
-        this.debug.setCurrentTileCollision(collType);
+        this.debug.setCurrentTileCollision(collisionMap.getCollisionType(tilePos.x, tilePos.y));
       }
+    }
+
+    // Update NPCs (Phase 6)
+    if (map) {
+      this.npcManager.update(deltaTime, map, this.collisionSystem);
+      this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
+
+      this.debug.setNPCInfo({
+        count: this.npcManager.getCount(),
+        npcs: this.npcManager.getAllNPCs().map(n => ({
+          id: n.id,
+          name: n.name,
+          role: n.role,
+          x: Math.floor(n.x),
+          y: Math.floor(n.y),
+          tileX: n.getTilePosition().x,
+          tileY: n.getTilePosition().y,
+          state: n.state,
+          direction: n.direction,
+          targetX: Math.floor(n.getTarget().x),
+          targetY: Math.floor(n.getTarget().y)
+        }))
+      });
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -190,40 +220,21 @@ export class Game {
         height: map.height,
         tileCounts: map.getTileCounts()
       });
-      const offset = this.worldRenderer.getOffset();
-      this.debug.setWorldOffset(offset.x, offset.y);
+      this.debug.setWorldOffset(this.camera.x, this.camera.y);
+      this.debug.setCameraInfo({
+        x: this.camera.x,
+        y: this.camera.y,
+        targetX: this.camera.targetX,
+        targetY: this.camera.targetY,
+        zoom: this.camera.getZoom(),
+        smoothing: this.camera.getSmoothing()
+      });
     }
 
-    this.handleDebugToggles();
+    this.handleDebugToggles(deltaTime);
   }
 
-  private updateCameraFollow(): void {
-    if (!this.player) return;
-    const map = this.world.getCurrentMap();
-    if (!map) return;
-    this.worldRenderer.centerOnTilePixel(this.player.x, this.player.y, this.renderer.getWidth(), this.renderer.getHeight());
-    this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
-  }
-
-  private centerOnPlayer(): void {
-    if (!this.player) {
-      const map = this.world.getCurrentMap();
-      if (!map) return;
-      this.worldRenderer.centerOn(25, 20, this.renderer.getWidth(), this.renderer.getHeight());
-      this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
-      return;
-    }
-    this.updateCameraFollow();
-  }
-
-  private centerOnVillage(): void {
-    const map = this.world.getCurrentMap();
-    if (!map) return;
-    this.worldRenderer.centerOn(25, 20, this.renderer.getWidth(), this.renderer.getHeight());
-    this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
-  }
-
-  private handleDebugToggles(): void {
+  private handleDebugToggles(_deltaTime: number): void {
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f1') || this.input.isKeyJustPressed('f3') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
     }
@@ -239,20 +250,17 @@ export class Game {
       (this.debug as any).gameTimeSeconds = 0;
       if (this.player) {
         const tileSize = WorldRenderer.TILE_SIZE;
-        const startX = 25 * tileSize + tileSize / 2;
-        const startY = 20 * tileSize + tileSize / 2;
-        this.player.setPosition(startX, startY);
+        this.player.setPosition(25 * tileSize + 16, 20 * tileSize + 16);
       }
-      this.centerOnPlayer();
+      this.camera.centerOn(this.player?.x ?? 25 * 32, this.player?.y ?? 20 * 32);
     }
 
     if (this.input.isKeyJustPressed('g')) {
-      const current = (this.worldRenderer as any).showGrid;
-      this.worldRenderer.setShowGrid(!current);
+      this.worldRenderer.setShowGrid(!this.worldRenderer['showGrid']);
     }
 
     if (this.input.isKeyJustPressed('c')) {
-      this.centerOnPlayer();
+      this.camera.centerOn(this.player?.x ?? 25 * 32, this.player?.y ?? 20 * 32);
     }
 
     if (this.input.isKeyJustPressed('h')) {
@@ -260,47 +268,49 @@ export class Game {
     }
 
     if (this.input.isKeyJustPressed('b')) {
-      const current = (this.worldRenderer as any).showTileCoords;
-      this.worldRenderer.setShowTileCoords(!current);
+      this.worldRenderer.setShowTileCoords(!this.worldRenderer['showTileCoords']);
     }
 
     if (this.input.isKeyJustPressed('v')) {
-      this.centerOnVillage();
+      this.camera.centerOnTile(25, 20);
     }
 
-    // Phase 4: Toggle collision debug
     if (this.input.isKeyJustPressed('k')) {
-      const current = this.collisionSystem.isShowCollision();
-      this.collisionSystem.setShowCollision(!current);
-      console.log('[Debug] Collision overlay:', !current ? 'ON' : 'OFF');
+      this.collisionSystem.setShowCollision(!this.collisionSystem.isShowCollision());
     }
 
-    // Phase 4: Test positions for collision tests
-    if (this.input.isKeyJustPressed('1')) {
-      // Teleport near tree for testing
-      if (this.player) {
-        this.player.setPosition(3 * 32 + 16, 3 * 32 + 16);
-        console.log('[Debug] Teleported to tree test area (3,3)');
+    // Phase 5: Camera controls
+    if (this.input.isKeyJustPressed('z')) {
+      const newZoom = this.camera.getZoom() === 1 ? 1.5 : this.camera.getZoom() === 1.5 ? 0.75 : 1;
+      this.camera.setZoom(newZoom);
+      console.log(`[Camera] Zoom: ${newZoom}`);
+    }
+
+    if (this.input.isKeyJustPressed('x')) {
+      const newSmooth = this.camera.getSmoothing() === 5 ? 0 : this.camera.getSmoothing() === 0 ? 10 : 5;
+      this.camera.setSmoothing(newSmooth);
+      console.log(`[Camera] Smoothing: ${newSmooth} (0=instant)`);
+    }
+
+    // Phase 6: NPC debug
+    if (this.input.isKeyJustPressed('n')) {
+      this.showNPCPaths = !this.showNPCPaths;
+      console.log(`[NPC] Paths debug: ${this.showNPCPaths ? 'ON' : 'OFF'}`);
+    }
+
+    if (this.input.isKeyJustPressed('p')) {
+      // Print NPC states
+      console.log('[NPC] States:');
+      for (const npc of this.npcManager.getAllNPCs()) {
+        console.log(`  ${npc.id} ${npc.name} ${npc.state} at ${Math.floor(npc.x)},${Math.floor(npc.y)} -> ${Math.floor(npc.getTarget().x)},${Math.floor(npc.getTarget().y)}`);
       }
     }
-    if (this.input.isKeyJustPressed('2')) {
-      if (this.player) {
-        this.player.setPosition(38 * 32 + 16, 10 * 32 + 16);
-        console.log('[Debug] Teleported to water test area (38,10)');
-      }
-    }
-    if (this.input.isKeyJustPressed('3')) {
-      if (this.player) {
-        this.player.setPosition(36 * 32 + 16, 19 * 32 + 16);
-        console.log('[Debug] Teleported to bridge test area (36,19)');
-      }
-    }
-    if (this.input.isKeyJustPressed('4')) {
-      if (this.player) {
-        this.player.setPosition(12 * 32 + 16, 10 * 32 + 16);
-        console.log('[Debug] Teleported to house test area (12,10)');
-      }
-    }
+
+    // Teleports
+    if (this.input.isKeyJustPressed('1') && this.player) this.player.setPosition(3*32+16, 3*32+16);
+    if (this.input.isKeyJustPressed('2') && this.player) this.player.setPosition(38*32+16, 10*32+16);
+    if (this.input.isKeyJustPressed('3') && this.player) this.player.setPosition(36*32+16, 19*32+16);
+    if (this.input.isKeyJustPressed('4') && this.player) this.player.setPosition(12*32+16, 10*32+16);
   }
 
   private render(): void {
@@ -312,14 +322,23 @@ export class Game {
 
     if (map) {
       this.worldRenderer.render(ctx, map, w, h);
-      // Render collision debug overlay (Phase 4)
       this.collisionSystem.renderDebug(ctx, this.worldRenderer, w, h);
     } else {
       this.renderer.renderBackground();
     }
 
+    // Render NPCs (Phase 6) - before player so player on top, but sorted by Y in renderer
+    if (this.npcManager.getCount() > 0) {
+      this.npcRenderer.renderAll(ctx, this.npcManager.getAllNPCs(), this.worldRenderer, this.camera);
+      if (this.showNPCPaths) {
+        this.npcRenderer.renderAllDebugPaths(ctx, this.npcManager.getAllNPCs(), this.worldRenderer, this.camera);
+      }
+    }
+
     if (this.player) {
       this.playerRenderer.render(ctx, this.player, this.worldRenderer);
+      // Also render with camera for consistency
+      // PlayerRenderer uses worldRenderer offset, which is synced from camera
     }
 
     this.debug.render(ctx);
@@ -335,42 +354,35 @@ export class Game {
     ctx.textBaseline = 'top';
 
     const lines = [
-      'PHASE 4 - COLLISION SYSTEM',
-      'Controls:',
-      '  WASD / Arrows - Move player',
+      'PHASE 5+6 - CAMERA + NPC FOUNDATION',
+      'Player:',
+      '  WASD/Arrows - Move',
       '  C - Center on player',
-      '  K - Toggle collision overlay',
-      '    Red=Blocked, Yellow=Interact',
-      '  G - Toggle grid',
-      '  B - Toggle tile coords',
-      '  ` / F2 - Toggle debug',
-      '  H - Toggle help',
-      '  R - Reset to square',
-      '  1 - Teleport to tree test',
-      '  2 - Teleport to water test',
-      '  3 - Teleport to bridge test',
-      '  4 - Teleport to house test',
+      'Camera (Phase5):',
+      '  Z - Toggle zoom (1/1.5/0.75)',
+      '  X - Toggle smoothing (5/0/10)',
+      '  V - Center on village',
+      '  Clamp + follow + smooth + zoom',
+      'Collision (Phase4):',
+      '  K - Collision overlay',
+      '  1-4 - Teleport tests',
+      'NPC (Phase6):',
+      '  N - Toggle NPC paths A↔B',
+      '  P - Print NPC states',
+      '  5 NPCs: Farmer, Shop, Blacksmith,',
+      '  Villager, Child - IDLE/WALK',
+      'General:',
+      '  G - Grid, B - Tile coords',
+      '  ` / F2 - Debug, H - Help, R - Reset',
       '',
-      'Collision:',
-      '  Grass/Road/Bridge/Farm=WALKABLE',
-      '  Water/Tree/Rock/House=BLOCKED',
-      '  Door=INTERACTABLE (walkable)',
-      '',
-      'Tests:',
-      '  Tree → Stop',
-      '  Rock → Stop',
-      '  Water → Stop',
-      '  House → Stop',
-      '  Bridge → Cross',
-      '  Corners/diagonal handled',
-      '',
-      `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y}` : 'N/A'}`,
-      `Colliding: ${this.player?.getIsColliding() ? 'YES' : 'NO'}`
+      `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} ${this.player.state}` : 'N/A'}`,
+      `Camera: ${Math.floor(this.camera.x)},${Math.floor(this.camera.y)} zoom ${this.camera.getZoom()} smooth ${this.camera.getSmoothing()}`,
+      `NPCs: ${this.npcManager.getCount()} - ${this.npcManager.getAllNPCs().map(n=>`${n.id}:${n.state}`).join(' ')}`
     ];
 
     const padding = 10;
     const lineHeight = 12;
-    const boxWidth = 260;
+    const boxWidth = 280;
     const boxHeight = lines.length * lineHeight + 20;
     const x = screenWidth - boxWidth - padding;
     const y = padding;
@@ -386,7 +398,7 @@ export class Game {
         ctx.fillStyle = '#8f8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#ddd';
-      } else if (line === 'Collision:' || line === 'Tests:') {
+      } else if (line.endsWith(':')) {
         ctx.fillStyle = '#ff8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#aaa';
@@ -400,13 +412,14 @@ export class Game {
 
   private handleResize(): void {
     this.renderer.resize();
+    const w = this.renderer.getWidth();
+    const h = this.renderer.getHeight();
+    this.camera.setScreenSize(w, h);
     const map = this.world.getCurrentMap();
     if (map) {
-      if (this.player) {
-        this.updateCameraFollow();
-      } else {
-        this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
-      }
+      this.camera.clampToMap();
+      const camOffset = this.camera.getOffset();
+      this.worldRenderer.setOffset(camOffset.x, camOffset.y);
     }
   }
 
@@ -418,5 +431,8 @@ export class Game {
   getPlayer(): Player | null { return this.player; }
   getPlayerRenderer(): PlayerRenderer { return this.playerRenderer; }
   getCollisionSystem(): CollisionSystem { return this.collisionSystem; }
+  getCamera(): Camera { return this.camera; }
+  getNPCManager(): NPCManager { return this.npcManager; }
+  getNPCRenderer(): NPCRenderer { return this.npcRenderer; }
   isGameRunning(): boolean { return this.isRunning; }
 }
