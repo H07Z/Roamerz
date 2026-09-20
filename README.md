@@ -3,23 +3,15 @@
 A 2D top-down living-world adventure where NPCs live independently of the player.
 
 ## Technology Stack
-
-**Selected:**
 - **TypeScript + Vite + HTML5 Canvas 2D**
-
-### Why this stack?
-- Full control over game loop, rendering, collision, pathfinding
-- Simplest reliable implementation, no engine bloat
-- Perfect for custom living-world simulation
-- Works in browser preview, modular, placeholder graphics first
 
 ## Project Phases
 
 ```
 PHASE 1  — Project Foundation [COMPLETE]
 PHASE 2  — World Map [COMPLETE]
-PHASE 3  — Player Movement [CURRENT - COMPLETE]
-PHASE 4  — Collision System
+PHASE 3  — Player Movement [COMPLETE]
+PHASE 4  — Collision System [CURRENT - COMPLETE]
 PHASE 5  — Camera System
 PHASE 6  — NPC Foundation
 PHASE 7  — NPC Pathfinding
@@ -30,102 +22,85 @@ PHASE 11 — Player Interaction & Dialogue
 PHASE 12 — Exploration & World Expansion
 ```
 
-## Phase 3 - Player Movement [CURRENT]
+## Phase 4 - Collision System [CURRENT]
 
 ### Objective
-Add exactly ONE player with placeholder graphics, movement, states, world boundary clamping.
+Prevent player from walking through blocked objects. Collision separate from graphics.
 
-### Player Details
-- **Start Position:** Village square (25,20) = 816,656 px
-- **Speed:** 150 px/s (consistent via deltaTime)
-- **Size:** 20x20 px
-- **States:** IDLE, WALK
-- **Directions:** 8-way (UP, DOWN, LEFT, RIGHT, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT)
-- **Movement:** WASD + Arrows, diagonal normalized (not faster), deltaTime based
-- **Boundary:** Cannot leave world (1600x1280), clamped to map edges
+### Collision Types
+- **WALKABLE (0):** Grass, Road, Bridge, Farmland - player can walk
+- **BLOCKED (1):** Water, Tree, Rock, House wall - blocks movement
+- **INTERACTABLE (2):** Door (ROAD adjacent to HOUSE) - walkable + future interaction
 
-### Placeholder Graphics
-- Shadow ellipse
-- Green tunic body rectangle
-- Skin head circle + hair
-- Eyes offset by direction
-- Direction arrow triangle
-- State dot (green IDLE, yellow WALK)
-- Walk bobbing animation (sin wave)
+### Design
+- Collision info separate from visual graphics (spec requirement)
+- Tile-based AABB collision, not pixel-perfect
+- Axis-separated resolution for sliding and corners
+- CollisionMap generated from WorldMap but stored separately
+- Bridge is WALKABLE, player can cross
 
 ### Running
 
 ```bash
 npm install
 npm run dev
-# Open http://localhost:5173
+# http://localhost:5173
 ```
 
-### Controls (Phase 3)
-- **WASD / Arrows** - Move player (diagonal: W+A etc)
-- **C** - Center camera on player
-- **V** - Center on village square (debug)
-- **G** - Toggle grid
-- **B** - Toggle tile coords
-- **\` / F2 / Shift+D** - Toggle debug overlay (D conflict avoided)
-- **H** - Toggle help panel
-- **R** - Reset player to village square + timer
+### Controls (Phase 4)
+- **WASD / Arrows** - Move player (diagonal supported, sliding along walls)
+- **C** - Center on player
+- **K** - Toggle collision overlay (Red=BLOCKED X, Yellow=INTERACTABLE)
+- **G** - Toggle grid, **B** - Tile coords
+- **\` / F2 / Shift+D** - Toggle debug
+- **H** - Help, **R** - Reset to square
+- **1/2/3/4** - Teleport to test areas: tree (3,3), water (38,10), bridge (36,19), house (12,10)
 
 ### Architecture
 
 ```
 src/
 ├── core/
-│   ├── Game.ts          - Main loop + player + world + camera follow
-│   ├── Renderer.ts      - Canvas fallback
-│   ├── InputManager.ts  - Keyboard/mouse
-│   └── DebugManager.ts  - FPS, time, screen, map, player info
+│   ├── Game.ts - + collisionSystem, collision debug rendering
+│   ├── DebugManager.ts - + collision info, current tile type
+│   └── ...
 ├── world/
-│   ├── TerrainType.ts
-│   ├── WorldMap.ts
-│   ├── World.ts
-│   ├── WorldRenderer.ts - + centerOnTilePixel, camera follow
-│   ├── maps/village_01.ts
-│   └── README.md
+│   ├── WorldRenderer.ts - + centerOnTilePixel
+│   └── ...
 ├── player/
-│   ├── Player.ts        - x,y,speed,dir,state, update with deltaTime, boundary clamp
-│   ├── PlayerRenderer.ts - placeholder graphics, bobbing, direction indicator
+│   ├── Player.ts - + collisionSystem param, resolveMovement, lastCollision
+│   └── PlayerRenderer.ts
+├── collision/
+│   ├── CollisionType.ts - WALKABLE/BLOCKED/INTERACTABLE
+│   ├── CollisionMap.ts - holds grid, fromWorldMap(), counts
+│   ├── CollisionSystem.ts - checkCollisionAt, resolveMovement, renderDebug
 │   └── README.md
-├── data/maps/village_01.json
 └── main.ts
 ```
 
-### Debug Overlay Shows
-- FPS, Game Time, Screen W/H, World Offset
-- Player: Pos (px), Tile, Speed, Dir, State, Distance traveled, Boundary status
-- Map: ID, Name, Size, Tile counts, Validation
-- Help panel with controls + test checklist
+### Debug Overlay
+- FPS, Time, Screen, Offset
+- Player: Pos, Tile, Speed, Dir, State, Dist, Boundary, Colliding YES/NO, Current Tile type, Blocked tiles list
+- Collision: Counts WALKABLE/BLOCKED/INTERACT, Overlay ON/OFF, mapping legend
+- Map: ID, Size, Tile counts
 
-### Tests (Phase 3)
-- Move up (W/Up) → PASS
-- Move down (S/Down) → PASS
-- Move left (A/Left) → PASS
-- Move right (D/Right/E) → PASS
-- Diagonal normalized (150 not 212) → PASS
-- Speed consistent at 60/30/10 FPS (deltaTime) → PASS
-- Cannot leave world boundaries → PASS
-- States IDLE/WALK → PASS
+### Tests (Phase 4)
+- Player → Tree stops → PASS (Tree BLOCKED, collision at 3,3)
+- Player → Rock stops → PASS (Rock BLOCKED at 2,10)
+- Player → Water stops → PASS (Water BLOCKED at 38,10)
+- Player → House stops → PASS (House BLOCKED at 12,10)
+- Player → Bridge crosses → PASS (Bridge WALKABLE at 36,19)
+- Corners/diagonal handled → PASS (axis-separated, sliding, X/Y blocked separately)
+- Door INTERACTABLE walkable → PASS (found at 18,15 etc)
+
+## Phase 3 Recap
+- Single player 150px/s, 8-dir, IDLE/WALK, placeholder graphics, boundary clamp, camera follow, deltaTime consistent
 
 ## Phase 2 Recap
-- Village map 50x40 = 2000 tiles, 8 terrain types
-- Square, 5 houses, farm, river with bridge, forest, boundaries
-- Data-driven JSON + generator, validation
+- Village 50x40=2000 tiles, 8 terrain types, square, 5 houses, farm, river+bridge, forest, boundaries, data-driven JSON
 
 ## Phase 1 Recap
-- Game window, rendering surface, loop with deltaTime
-- FPS/debug, resize handling
+- Game window, loop with deltaTime, FPS/debug, resize
 
-## Development Principles
-1. Small changes
-2. Test before expanding
-3. No unnecessary complexity
-4. Modular architecture
-5. Data-driven design
-6. Debug everything
-7. Don't rewrite working systems
-8. Placeholder graphics first
+## Principles
+Small changes, test before expanding, no unnecessary complexity, modular, data-driven, debug everything, placeholder graphics first

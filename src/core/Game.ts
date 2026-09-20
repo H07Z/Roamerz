@@ -1,14 +1,11 @@
 /**
- * Game - Phase 3
- * Core game class implementing:
- * - Initialization
- * - Game Loop (UPDATE -> RENDER) with deltaTime
- * - Module orchestration
- * - World Map integration (Phase 2)
- * - Player Movement (Phase 3)
- *
- * Loop:
- * START → INITIALIZE → UPDATE → RENDER → loop
+ * Game - Phase 4
+ * Core game class with Collision System
+ * - World Map
+ * - Player Movement with collision
+ * - Collision types: WALKABLE, BLOCKED, INTERACTABLE
+ * - Prevents walking through trees, rocks, water, houses
+ * - Bridge remains walkable
  */
 
 import { Renderer } from './Renderer';
@@ -18,6 +15,8 @@ import { World } from '../world/World';
 import { WorldRenderer } from '../world/WorldRenderer';
 import { Player } from '../player/Player';
 import { PlayerRenderer } from '../player/PlayerRenderer';
+import { CollisionSystem } from '../collision/CollisionSystem';
+import { CollisionType } from '../collision/CollisionType';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -28,6 +27,7 @@ export class Game {
   private worldRenderer: WorldRenderer;
   private player: Player | null = null;
   private playerRenderer: PlayerRenderer;
+  private collisionSystem: CollisionSystem;
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
@@ -39,9 +39,6 @@ export class Game {
 
   private showHelp: boolean = true;
 
-  // Phase 3: Player speed consistent test - track FPS vs speed
-  private lastPlayerPos: { x: number; y: number } = { x: 0, y: 0 };
-
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new Renderer(canvas);
@@ -50,12 +47,13 @@ export class Game {
     this.world = new World();
     this.worldRenderer = new WorldRenderer();
     this.playerRenderer = new PlayerRenderer();
+    this.collisionSystem = new CollisionSystem();
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
 
   initialize(): void {
-    console.log('[Game] Initializing Phase 3 - Player Movement...');
+    console.log('[Game] Initializing Phase 4 - Collision System...');
 
     this.input.initialize(this.canvas);
 
@@ -65,18 +63,21 @@ export class Game {
       if (map) {
         console.log(`[Game] World map loaded: ${map.mapId} - ${map.name}`);
 
-        // Initialize player at village square (25,20) - center of map
+        // Initialize collision system from world map (Phase 4)
+        this.collisionSystem.initializeFromWorldMap(map);
+        console.log(`[Game] Collision map generated:`, this.collisionSystem.getCollisionMap()?.getCounts());
+
+        // Initialize player at village square
         const tileSize = WorldRenderer.TILE_SIZE;
         const startX = 25 * tileSize + tileSize / 2;
         const startY = 20 * tileSize + tileSize / 2;
-        this.player = new Player(startX, startY, 150); // 150 px/s
-        this.lastPlayerPos = { x: startX, y: startY };
+        this.player = new Player(startX, startY, 150);
 
-        console.log(`[Game] Player created at (${startX}, ${startY}) speed=${this.player.speed} px/s`);
-        console.log(`[Game] Player data: x=${this.player.x}, y=${this.player.y}, speed=${this.player.speed}, dir=${this.player.direction}, state=${this.player.state}`);
+        console.log(`[Game] Player created at (${startX}, ${startY})`);
+        console.log(`[Game] Collision: GRASS/ROAD/BRIDGE/FARMLAND=WALKABLE, WATER/TREE/ROCK/HOUSE=BLOCKED, Door=INTERACTABLE`);
       }
     } catch (e) {
-      console.error('[Game] World initialization failed:', e);
+      console.error('[Game] Initialization failed:', e);
     }
 
     window.addEventListener('resize', this.boundResizeHandler);
@@ -92,17 +93,13 @@ export class Game {
     }
 
     this.handleResize();
-
-    // Center camera on player after resize
     this.centerOnPlayer();
 
     const loading = document.getElementById('loading');
-    if (loading) {
-      loading.style.display = 'none';
-    }
+    if (loading) loading.style.display = 'none';
 
     console.log('[Game] Initialized. Screen:', this.renderer.getWidth(), 'x', this.renderer.getHeight());
-    console.log('[Game] Phase 3 Controls: WASD/Arrows to move player, C to center, G grid, D debug, H help');
+    console.log('[Game] Phase 4 Controls: WASD/Arrows move, K toggle collision debug, C center, G grid');
   }
 
   start(): void {
@@ -117,7 +114,6 @@ export class Game {
   stop(): void {
     this.isRunning = false;
     if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
-    console.log('[Game] Stopped.');
   }
 
   destroy(): void {
@@ -145,16 +141,14 @@ export class Game {
     this.world.update(deltaTime);
     this.worldRenderer.update(deltaTime);
 
-    // Update player (Phase 3)
     const map = this.world.getCurrentMap();
     if (this.player && map) {
-      this.player.update(deltaTime, this.input, map);
+      // Update player with collision system (Phase 4)
+      this.player.update(deltaTime, this.input, map, this.collisionSystem);
       this.playerRenderer.update(deltaTime, this.player);
 
-      // Simple camera follow - keep player centered (Phase 3 minimal camera, expanded in Phase 5)
       this.updateCameraFollow();
 
-      // Update debug with player info
       this.debug.setPlayerInfo({
         x: this.player.x,
         y: this.player.y,
@@ -166,9 +160,24 @@ export class Game {
         distance: this.player.getTotalDistance()
       });
 
-      // Check boundary for testing
       const boundary = this.player.isAtBoundary(map);
       this.debug.setPlayerAtBoundary(boundary.atBoundary, boundary.side);
+
+      // Collision debug info
+      const collisionMap = this.collisionSystem.getCollisionMap();
+      if (collisionMap) {
+        this.debug.setCollisionInfo({
+          counts: collisionMap.getCounts(),
+          isColliding: this.player.getIsColliding(),
+          lastCollision: this.player.getLastCollision(),
+          showCollision: this.collisionSystem.isShowCollision()
+        });
+
+        // Check current tile collision type
+        const tilePos = this.player.getTilePosition();
+        const collType = collisionMap.getCollisionType(tilePos.x, tilePos.y);
+        this.debug.setCurrentTileCollision(collType);
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -185,7 +194,6 @@ export class Game {
       this.debug.setWorldOffset(offset.x, offset.y);
     }
 
-    // Input handling
     this.handleDebugToggles();
   }
 
@@ -193,15 +201,12 @@ export class Game {
     if (!this.player) return;
     const map = this.world.getCurrentMap();
     if (!map) return;
-
-    // Center camera on player (simple follow, no smoothing yet - Phase 5 will add smoothing)
     this.worldRenderer.centerOnTilePixel(this.player.x, this.player.y, this.renderer.getWidth(), this.renderer.getHeight());
     this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
   }
 
   private centerOnPlayer(): void {
     if (!this.player) {
-      // Fallback to village square
       const map = this.world.getCurrentMap();
       if (!map) return;
       this.worldRenderer.centerOn(25, 20, this.renderer.getWidth(), this.renderer.getHeight());
@@ -219,50 +224,15 @@ export class Game {
   }
 
   private handleDebugToggles(): void {
-    // Debug toggle - D or Backquote or F3
-    if (this.input.isKeyJustPressed('d') && !this.input.isKeyDown('shift')) {
-      // Only toggle if not holding shift (shift+D is for right pan alternative, but now player uses D)
-      // To avoid conflict, we toggle on just pressed but player movement will still happen
-      // For Phase 3, we also support backquote as alternative
-      // We'll toggle debug but still allow player to move right
-    }
-    // Better: Use backquote and F1-F3 for debug to avoid WASD conflict
-    if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f1') || this.input.isKeyJustPressed('f3')) {
+    if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f1') || this.input.isKeyJustPressed('f3') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
-      console.log('[Debug] Toggled:', this.debug.isEnabled() ? 'ON' : 'OFF');
-    }
-    // Keep D toggle as well for backward compat, but only when not moving? We'll keep it simple: D toggles
-    if (this.input.isKeyJustPressed('d') && this.input.isKeyDown('shift') === false) {
-      // Check if player is not trying to move right exclusively? Actually we want D to both move and toggle
-      // For Phase 3, we allow D to toggle debug - it's okay if player moves a bit when toggling
-      // But to reduce conflict, require Ctrl+D or just use backquote as primary
-      // Let's keep D toggle but only if player is idle (not moving)
-      if (this.player && this.player.state === 'IDLE') {
-        // If idle and D pressed, toggle debug and don't move (player will stay idle this frame)
-        // The player update already happened before this, so movement for this frame already processed
-        // We need to toggle now
-        // Actually player update already used isKeyDown, so if D pressed, player would have moved
-        // To avoid, we toggle only on Shift+D or Backquote
-      }
     }
 
-    // For Phase 3, primary debug toggle is backquote and F3, plus we keep D as secondary but with condition
-    // Let's implement: Backquote, F3, and also plain D when pressed alone (not with WASD movement) - we already handled
-    // Simplest: Keep D toggle for now, but also allow backquote
     if (this.input.isKeyJustPressed('d')) {
-      // If player is moving, don't toggle? Or do toggle? Let's toggle only if Shift is held to avoid conflict
-      // Actually for testing, we want easy toggle, so we will toggle on D press but also move
-      // We'll check if input has only D pressed and no other movement keys, then toggle
       const onlyD = this.input.isKeyDown('d') && !this.input.isKeyDown('a') && !this.input.isKeyDown('w') && !this.input.isKeyDown('s') && !this.input.isKeyDown('arrowup') && !this.input.isKeyDown('arrowdown') && !this.input.isKeyDown('arrowleft') && !this.input.isKeyDown('arrowright');
       if (onlyD || this.input.isKeyDown('shift')) {
         this.debug.setEnabled(!this.debug.isEnabled());
-        console.log('[Debug] Toggled via D:', this.debug.isEnabled() ? 'ON' : 'OFF');
       }
-    }
-
-    // Alternative toggles that don't conflict
-    if (this.input.isKeyJustPressed('f2')) {
-      this.debug.setEnabled(!this.debug.isEnabled());
     }
 
     if (this.input.isKeyJustPressed('r')) {
@@ -272,7 +242,6 @@ export class Game {
         const startX = 25 * tileSize + tileSize / 2;
         const startY = 20 * tileSize + tileSize / 2;
         this.player.setPosition(startX, startY);
-        console.log('[Debug] Player reset to village square');
       }
       this.centerOnPlayer();
     }
@@ -284,7 +253,6 @@ export class Game {
 
     if (this.input.isKeyJustPressed('c')) {
       this.centerOnPlayer();
-      console.log('[Debug] Centered on player');
     }
 
     if (this.input.isKeyJustPressed('h')) {
@@ -298,7 +266,40 @@ export class Game {
 
     if (this.input.isKeyJustPressed('v')) {
       this.centerOnVillage();
-      console.log('[Debug] Centered on village (not player)');
+    }
+
+    // Phase 4: Toggle collision debug
+    if (this.input.isKeyJustPressed('k')) {
+      const current = this.collisionSystem.isShowCollision();
+      this.collisionSystem.setShowCollision(!current);
+      console.log('[Debug] Collision overlay:', !current ? 'ON' : 'OFF');
+    }
+
+    // Phase 4: Test positions for collision tests
+    if (this.input.isKeyJustPressed('1')) {
+      // Teleport near tree for testing
+      if (this.player) {
+        this.player.setPosition(3 * 32 + 16, 3 * 32 + 16);
+        console.log('[Debug] Teleported to tree test area (3,3)');
+      }
+    }
+    if (this.input.isKeyJustPressed('2')) {
+      if (this.player) {
+        this.player.setPosition(38 * 32 + 16, 10 * 32 + 16);
+        console.log('[Debug] Teleported to water test area (38,10)');
+      }
+    }
+    if (this.input.isKeyJustPressed('3')) {
+      if (this.player) {
+        this.player.setPosition(36 * 32 + 16, 19 * 32 + 16);
+        console.log('[Debug] Teleported to bridge test area (36,19)');
+      }
+    }
+    if (this.input.isKeyJustPressed('4')) {
+      if (this.player) {
+        this.player.setPosition(12 * 32 + 16, 10 * 32 + 16);
+        console.log('[Debug] Teleported to house test area (12,10)');
+      }
     }
   }
 
@@ -311,11 +312,12 @@ export class Game {
 
     if (map) {
       this.worldRenderer.render(ctx, map, w, h);
+      // Render collision debug overlay (Phase 4)
+      this.collisionSystem.renderDebug(ctx, this.worldRenderer, w, h);
     } else {
       this.renderer.renderBackground();
     }
 
-    // Render player (Phase 3)
     if (this.player) {
       this.playerRenderer.render(ctx, this.player, this.worldRenderer);
     }
@@ -333,43 +335,47 @@ export class Game {
     ctx.textBaseline = 'top';
 
     const lines = [
-      'PHASE 3 - PLAYER MOVEMENT',
+      'PHASE 4 - COLLISION SYSTEM',
       'Controls:',
       '  WASD / Arrows - Move player',
-      '  (Diagonal supported)',
       '  C - Center on player',
-      '  V - Center on village',
+      '  K - Toggle collision overlay',
+      '    Red=Blocked, Yellow=Interact',
       '  G - Toggle grid',
       '  B - Toggle tile coords',
-      '  ` / F2 / Shift+D - Toggle debug',
+      '  ` / F2 - Toggle debug',
       '  H - Toggle help',
-      '  R - Reset player to square',
+      '  R - Reset to square',
+      '  1 - Teleport to tree test',
+      '  2 - Teleport to water test',
+      '  3 - Teleport to bridge test',
+      '  4 - Teleport to house test',
       '',
-      'Player:',
-      `  Pos: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)}` : 'N/A'}`,
-      `  Tile: ${this.player ? `${this.player.getTilePosition().x},${this.player.getTilePosition().y}` : 'N/A'}`,
-      `  State: ${this.player?.state ?? 'N/A'}`,
-      `  Dir: ${this.player?.direction ?? 'N/A'}`,
-      `  Speed: ${this.player?.speed ?? 0} px/s`,
+      'Collision:',
+      '  Grass/Road/Bridge/Farm=WALKABLE',
+      '  Water/Tree/Rock/House=BLOCKED',
+      '  Door=INTERACTABLE (walkable)',
       '',
       'Tests:',
-      '  Move Up/Down/Left/Right',
-      '  Diagonal (W+A etc)',
-      '  Speed consistent (deltaTime)',
-      '  Cannot leave world bounds',
+      '  Tree → Stop',
+      '  Rock → Stop',
+      '  Water → Stop',
+      '  House → Stop',
+      '  Bridge → Cross',
+      '  Corners/diagonal handled',
       '',
-      'Map: village_01 50x40',
-      'Player start @ 25,20 square'
+      `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y}` : 'N/A'}`,
+      `Colliding: ${this.player?.getIsColliding() ? 'YES' : 'NO'}`
     ];
 
     const padding = 10;
-    const lineHeight = 13;
-    const boxWidth = 240;
+    const lineHeight = 12;
+    const boxWidth = 260;
     const boxHeight = lines.length * lineHeight + 20;
     const x = screenWidth - boxWidth - padding;
     const y = padding;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
     ctx.fillRect(x, y, boxWidth, boxHeight);
     ctx.strokeStyle = 'rgba(100, 255, 100, 0.3)';
     ctx.strokeRect(x, y, boxWidth, boxHeight);
@@ -380,7 +386,7 @@ export class Game {
         ctx.fillStyle = '#8f8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#ddd';
-      } else if (line === 'Player:' || line === 'Tests:') {
+      } else if (line === 'Collision:' || line === 'Tests:') {
         ctx.fillStyle = '#ff8';
         ctx.fillText(line, x + 10, y + 10 + i * lineHeight);
         ctx.fillStyle = '#aaa';
@@ -402,10 +408,8 @@ export class Game {
         this.worldRenderer.clampToMap(map, this.renderer.getWidth(), this.renderer.getHeight());
       }
     }
-    console.log(`[Renderer] Resized to ${this.renderer.getWidth()} x ${this.renderer.getHeight()}`);
   }
 
-  // Getters
   getRenderer(): Renderer { return this.renderer; }
   getInput(): InputManager { return this.input; }
   getDebug(): DebugManager { return this.debug; }
@@ -413,5 +417,6 @@ export class Game {
   getWorldRenderer(): WorldRenderer { return this.worldRenderer; }
   getPlayer(): Player | null { return this.player; }
   getPlayerRenderer(): PlayerRenderer { return this.playerRenderer; }
+  getCollisionSystem(): CollisionSystem { return this.collisionSystem; }
   isGameRunning(): boolean { return this.isRunning; }
 }

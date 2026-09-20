@@ -1,12 +1,14 @@
 /**
- * Player - Phase 3
- * Single player with movement, states, direction, world boundary clamping
- * No collision with terrain yet (Phase 4), only world boundaries
+ * Player - Phase 4
+ * Single player with movement, states, direction, world boundary + collision
+ * Now uses CollisionSystem to prevent walking through blocked objects
  */
 
 import { InputManager } from '../core/InputManager';
 import { WorldMap } from '../world/WorldMap';
 import { WorldRenderer } from '../world/WorldRenderer';
+import { CollisionSystem } from '../collision/CollisionSystem';
+import { CollisionType } from '../collision/CollisionType';
 
 export enum PlayerState {
   IDLE = 'IDLE',
@@ -35,16 +37,18 @@ export interface PlayerData {
 export class Player {
   public x: number;
   public y: number;
-  public speed: number; // pixels per second
+  public speed: number;
   public direction: PlayerDirection;
   public state: PlayerState;
 
-  // Size for rendering and boundary checks
   public width: number = 20;
   public height: number = 20;
 
-  // For testing deltaTime consistency
   private totalDistanceTraveled: number = 0;
+
+  // For Phase 4 collision debug
+  private lastCollision: { x: number; y: number; type: CollisionType }[] = [];
+  private isColliding: boolean = false;
 
   constructor(x: number, y: number, speed: number = 150) {
     this.x = x;
@@ -55,79 +59,85 @@ export class Player {
   }
 
   /**
-   * Update player based on input and deltaTime
-   * Handles 8-directional movement with normalized diagonal speed
+   * Update player based on input, deltaTime, and collision system
    */
-  update(deltaTime: number, input: InputManager, worldMap: WorldMap | null): void {
+  update(
+    deltaTime: number,
+    input: InputManager,
+    worldMap: WorldMap | null,
+    collisionSystem: CollisionSystem | null = null
+  ): void {
     let moveX = 0;
     let moveY = 0;
 
-    // Input: WASD + Arrow keys
-    // UP
-    if (input.isKeyDown('w') || input.isKeyDown('arrowup')) {
-      moveY -= 1;
-    }
-    // DOWN
-    if (input.isKeyDown('s') || input.isKeyDown('arrowdown')) {
-      moveY += 1;
-    }
-    // LEFT
-    if (input.isKeyDown('a') || input.isKeyDown('arrowleft')) {
-      moveX -= 1;
-    }
-    // RIGHT - D is also debug toggle, but we allow movement when held
-    // Check for D or E (E as alternative right to avoid debug conflict)
-    if (input.isKeyDown('d') || input.isKeyDown('arrowright') || input.isKeyDown('e')) {
-      // If D just pressed this frame, it toggled debug, but we still allow movement
-      // For pure D press, movement will start next frame after toggle
-      // To make it responsive, we check isKeyDown regardless
-      moveX += 1;
-    }
+    if (input.isKeyDown('w') || input.isKeyDown('arrowup')) moveY -= 1;
+    if (input.isKeyDown('s') || input.isKeyDown('arrowdown')) moveY += 1;
+    if (input.isKeyDown('a') || input.isKeyDown('arrowleft')) moveX -= 1;
+    if (input.isKeyDown('d') || input.isKeyDown('arrowright') || input.isKeyDown('e')) moveX += 1;
 
-    // Determine if moving
     const isMoving = moveX !== 0 || moveY !== 0;
 
     if (isMoving) {
-      // Normalize diagonal movement (so diagonal not faster)
       if (moveX !== 0 && moveY !== 0) {
         const length = Math.sqrt(moveX * moveX + moveY * moveY);
         moveX /= length;
         moveY /= length;
       }
 
-      // Update direction based on movement
       this.updateDirection(moveX, moveY);
 
-      // Calculate new position with deltaTime
       const deltaX = moveX * this.speed * deltaTime;
       const deltaY = moveY * this.speed * deltaTime;
 
-      let newX = this.x + deltaX;
-      let newY = this.y + deltaY;
+      let newX = this.x;
+      let newY = this.y;
+      this.isColliding = false;
+      this.lastCollision = [];
 
-      // Clamp to world boundaries (Phase 3 requirement: cannot leave world)
-      if (worldMap) {
-        const mapPixelWidth = worldMap.width * WorldRenderer.TILE_SIZE;
-        const mapPixelHeight = worldMap.height * WorldRenderer.TILE_SIZE;
+      if (collisionSystem && collisionSystem.getCollisionMap()) {
+        // Use collision system to resolve movement
+        const result = collisionSystem.resolveMovement(this.x, this.y, deltaX, deltaY, this.width, this.height);
+        newX = result.x;
+        newY = result.y;
+        this.isColliding = result.collidedX || result.collidedY;
+        this.lastCollision = result.blockedTiles.map(t => ({ x: t.x, y: t.y, type: t.type }));
+      } else {
+        // Fallback to old boundary-only logic (Phase 3)
+        let tempX = this.x + deltaX;
+        let tempY = this.y + deltaY;
 
-        // Player is centered at x,y, so clamp with half width/height
-        const halfW = this.width / 2;
-        const halfH = this.height / 2;
+        if (worldMap) {
+          const mapPixelWidth = worldMap.width * WorldRenderer.TILE_SIZE;
+          const mapPixelHeight = worldMap.height * WorldRenderer.TILE_SIZE;
+          const halfW = this.width / 2;
+          const halfH = this.height / 2;
+          tempX = Math.max(halfW, Math.min(tempX, mapPixelWidth - halfW));
+          tempY = Math.max(halfH, Math.min(tempY, mapPixelHeight - halfH));
+        }
 
-        newX = Math.max(halfW, Math.min(newX, mapPixelWidth - halfW));
-        newY = Math.max(halfH, Math.min(newY, mapPixelHeight - halfH));
+        newX = tempX;
+        newY = tempY;
       }
 
-      // Track distance for testing consistency
       const dist = Math.sqrt((newX - this.x) ** 2 + (newY - this.y) ** 2);
       this.totalDistanceTraveled += dist;
 
+      // Only update position if actually moved (or if collision prevented movement, stay)
       this.x = newX;
       this.y = newY;
 
-      this.state = PlayerState.WALK;
+      // If collision prevented all movement, still WALK state? For Phase 4, if trying to walk into wall, stay WALK but position doesn't change
+      // Could also set to IDLE if no movement, but we keep WALK to show intent
+      if (dist > 0.01) {
+        this.state = PlayerState.WALK;
+      } else {
+        // Trying to move but blocked
+        this.state = PlayerState.WALK;
+        // Alternatively, if completely blocked, we could keep WALK to indicate pushing against wall
+      }
     } else {
       this.state = PlayerState.IDLE;
+      this.isColliding = false;
     }
   }
 
@@ -167,26 +177,38 @@ export class Player {
     return this.totalDistanceTraveled;
   }
 
-  // For Phase 3 testing: set position directly
   setPosition(x: number, y: number): void {
     this.x = x;
     this.y = y;
   }
 
-  // Check if player at world boundary (for testing)
   isAtBoundary(worldMap: WorldMap, threshold: number = 5): { atBoundary: boolean; side: string | null } {
     if (!worldMap) return { atBoundary: false, side: null };
-
     const mapPixelWidth = worldMap.width * WorldRenderer.TILE_SIZE;
     const mapPixelHeight = worldMap.height * WorldRenderer.TILE_SIZE;
     const halfW = this.width / 2;
     const halfH = this.height / 2;
-
     if (this.x <= halfW + threshold) return { atBoundary: true, side: 'left' };
     if (this.x >= mapPixelWidth - halfW - threshold) return { atBoundary: true, side: 'right' };
     if (this.y <= halfH + threshold) return { atBoundary: true, side: 'top' };
     if (this.y >= mapPixelHeight - halfH - threshold) return { atBoundary: true, side: 'bottom' };
-
     return { atBoundary: false, side: null };
+  }
+
+  // Phase 4 collision debug
+  getLastCollision(): { x: number; y: number; type: CollisionType }[] {
+    return this.lastCollision;
+  }
+
+  getIsColliding(): boolean {
+    return this.isColliding;
+  }
+
+  // Check what terrain is under player (for testing bridge etc)
+  getCurrentTileInfo(worldMap: WorldMap | null): { terrain: number | null; collision: CollisionType | null } | null {
+    if (!worldMap) return null;
+    const tilePos = this.getTilePosition();
+    const terrain = worldMap.getTile(tilePos.x, tilePos.y);
+    return { terrain, collision: null };
   }
 }
