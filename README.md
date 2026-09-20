@@ -4,7 +4,7 @@ A 2D top-down living-world adventure where NPCs live independently of the player
 
 ## Technology Stack
 
-**Selected for Phase 1:**
+**Selected:**
 - **TypeScript + Vite + HTML5 Canvas 2D**
 
 ### Why this stack?
@@ -19,17 +19,15 @@ A 2D top-down living-world adventure where NPCs live independently of the player
 - ✅ Zero heavy dependencies, fast iteration
 
 **Considered Alternatives:**
-- **Phaser:** Great for 2D games, but hides core systems we want to build ourselves (collision, pathfinding). Overkill for foundation phases. Could be considered later if we need advanced sprite animation pipelines.
-- **Godot / Unity:** Not web-native in this sandbox, binary assets, harder to preview, engine lock-in.
+- **Phaser:** Great for 2D games, but hides core systems we want to build ourselves (collision, pathfinding). Overkill for foundation phases.
+- **Godot / Unity:** Not web-native in this sandbox, binary assets, harder to preview.
 - **Python / Pygame:** Harder to host preview, not browser-native.
-
-**Tradeoff Summary:** We sacrifice built-in physics/sprite tools for complete control and simplicity. This aligns with "No unnecessary complexity" and "Small changes" principles.
 
 ## Project Phases
 
 ```
-PHASE 1  — Project Foundation [CURRENT - COMPLETE]
-PHASE 2  — World Map
+PHASE 1  — Project Foundation [COMPLETE]
+PHASE 2  — World Map [CURRENT - COMPLETE]
 PHASE 3  — Player Movement
 PHASE 4  — Collision System
 PHASE 5  — Camera System
@@ -42,17 +40,31 @@ PHASE 11 — Player Interaction & Dialogue
 PHASE 12 — Exploration & World Expansion
 ```
 
-## Phase 1 - Project Foundation
+## Phase 2 - World Map [CURRENT]
 
 ### Objective
-Smallest possible working game application:
-- Game window
-- Rendering surface
-- Basic game loop
-- Simple background
-- FPS/debug information
+First small village map:
+- Village square
+- Forest entrance
+- Road (N-S and E-W cross)
+- 5 houses
+- Small farm with fence
+- Small river with bridge
+- Trees, rocks, boundaries
 
-No player, no NPCs, no pathfinding yet.
+### Map Details
+- **ID:** village_01 - Greenhollow Village
+- **Size:** 50 x 40 tiles = 2000 tiles
+- **Tile Size:** 32px = 1600x1280px world
+- **Terrain Types (8):** GRASS, ROAD, WATER, BRIDGE, TREE, ROCK, HOUSE, FARMLAND
+- **Features:**
+  - Village square at (25,20)
+  - River at x=38-39 vertical
+  - Bridge at 36-41,19-20 (12 tiles, distinct)
+  - 5 houses with doors
+  - Farm at SW with rock fence
+  - Forest dense north
+  - Boundaries: TREE/ROCK border with openings
 
 ### Running
 
@@ -62,28 +74,52 @@ npm run dev
 # Open http://localhost:5173
 ```
 
-### Controls
+### Controls (Phase 2 Debug)
+- **WASD / Arrows + E** - Pan map (debug, before camera system)
+- **C** - Center on village square
+- **G** - Toggle grid
+- **B** - Toggle tile coordinates
 - **D** - Toggle debug overlay
-- **R** - Reset game timer
+- **H** - Toggle help panel
+- **R** - Reset timer + center
 
 ### Architecture
 
 ```
 src/
 ├── core/
-│   ├── Game.ts          - Main loop: INITIALIZE → UPDATE → RENDER
-│   ├── Renderer.ts      - Canvas & background
+│   ├── Game.ts          - Main loop + world integration
+│   ├── Renderer.ts      - Canvas & background (fallback)
 │   ├── InputManager.ts  - Keyboard/mouse
-│   └── DebugManager.ts  - FPS, time, screen size
+│   └── DebugManager.ts  - FPS, time, screen, map info
+├── world/
+│   ├── TerrainType.ts   - Enum + properties
+│   ├── WorldMap.ts      - Map data container + validation
+│   ├── World.ts         - World manager
+│   ├── WorldRenderer.ts - Tile rendering with distinct visuals
+│   ├── maps/
+│   │   └── village_01.ts - Generator (data separate from logic)
+│   └── README.md
+├── data/
+│   └── maps/
+│       └── village_01.json - JSON data file (data-driven)
 └── main.ts              - Bootstrap
 ```
 
 ### Debug Overlay Shows
-- FPS (with color indicator: green >50, yellow 30-50, red <30)
-- Game Time (HH:MM:SS)
-- Screen Width/Height
-- Total Frames
-- Status
+- FPS with color indicator
+- Game Time
+- Screen W/H
+- World Offset (for boundary testing)
+- Map ID, Name, Size, Tile count
+- Tile counts per type (G,R,W,B,T,O,H,F)
+- Validation: OK/CORRUPT + Types distinct count
+- Map border (red dashed) when visible
+
+### Data-Driven Design
+- Map data in `src/data/maps/village_01.json`
+- Generator in `src/world/maps/village_01.ts` separate from WorldMap logic
+- WorldMap validates tile count and terrain validity on load
 
 ## Development Principles
 1. Small changes
@@ -94,3 +130,8 @@ src/
 6. Debug everything
 7. Don't rewrite working systems
 8. Placeholder graphics first
+
+## Phase 1 Recap
+- Game window, rendering surface, game loop with deltaTime
+- FPS/debug, responsive resize
+- No player/NPCs yet (by design)
