@@ -286,6 +286,18 @@ export interface QuestDebugInfo {
   showQuests: boolean;
 }
 
+export interface AchievementDebugInfo {
+  count: number;
+  unlockedCount: number;
+  percent: number;
+  nearlyCount: number;
+  lastUnlocked: string[];
+  stats: Record<string, number>;
+  debug: string;
+  showAchievements: boolean;
+  toasts: number;
+}
+
 
 export class DebugManager {
   private fps: number = 0;
@@ -333,7 +345,8 @@ export class DebugManager {
   private weatherInfo: WeatherDebugInfo | null = null;
   private economyInfo: EconomyDebugInfo | null = null;
   private questInfo: QuestDebugInfo | null = null;
-  private currentPhase: string = '21';
+  private achievementInfo: AchievementDebugInfo | null = null;
+  private currentPhase: string = '22 (18.1)';
 
   constructor() {
     this.lastFpsUpdate = performance.now();
@@ -391,6 +404,7 @@ export class DebugManager {
   setWeatherInfo(info: WeatherDebugInfo): void { this.weatherInfo = info; }
   setEconomyInfo(info: EconomyDebugInfo): void { this.economyInfo = info; }
   setQuestInfo(info: QuestDebugInfo): void { this.questInfo = info; }
+  setAchievementInfo(info: AchievementDebugInfo): void { this.achievementInfo = info; }
 
   getFps(): number { return this.fps; }
 
@@ -433,12 +447,13 @@ export class DebugManager {
     const weatherHeight = this.weatherInfo ? 15 : 0;
     const economyHeight = this.economyInfo ? 15 : 0;
     const questHeight = this.questInfo ? 15 : 0;
+    const achievementHeight = this.achievementInfo ? 26 : 0;
     const npcHeight = this.npcInfo ? Math.min(100, this.npcInfo.count * lineHeight + 15) : 0;
     const npcPathHeight = this.npcPathInfo.length > 0 ? Math.min(120, this.npcPathInfo.length * lineHeight + 15) : 0;
     const buildingDetailHeight = this.buildingDetails.length > 0 ? Math.min(60, this.buildingDetails.length * lineHeight + 15) : 0;
     const scheduleDetailHeight = this.scheduleDetails.length > 0 ? Math.min(120, this.scheduleDetails.length * lineHeight + 15) : 0;
     const lifeDetailHeight = this.lifeDetails.length > 0 ? Math.min(150, this.lifeDetails.length * lineHeight * 2 + 15) : 0;
-    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + economyHeight + questHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
+    const boxHeight = baseHeight + mapHeight + worldHeight + explorationHeight + saveHeight + timeHeight + playerHeight + cameraHeight + pathfindingHeight + buildingHeight + scheduleHeight + lifeHeight + interactionHeight + dialogueHeight + farmingHeight + animalHeight + inventoryHeight + craftingHeight + cookingHeight + weatherHeight + economyHeight + questHeight + achievementHeight + npcHeight + npcPathHeight + buildingDetailHeight + scheduleDetailHeight + lifeDetailHeight + 20;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
@@ -534,6 +549,17 @@ export class DebugManager {
     if (this.questInfo) {
       ctx.fillStyle = '#8af';
       ctx.fillText(`QUESTS: ${this.questInfo.questCount} ${this.questInfo.quests.slice(0,3).join(',')} | Active:${this.questInfo.activeCount} Done:${this.questInfo.completedCount} Started:${this.questInfo.totalStarted} Completed:${this.questInfo.totalCompleted} | ${this.questInfo.debug} UI:${this.questInfo.showQuests?'OPEN':'CLOSED'}`, x, y);
+      y += lineHeight;
+      ctx.fillStyle = '#ddd';
+    }
+
+    if (this.achievementInfo) {
+      const a = this.achievementInfo;
+      ctx.fillStyle = '#fc6';
+      ctx.fillText(`ACHIEVEMENTS: ${a.unlockedCount}/${a.count} (${a.percent.toFixed(0)}%) Nearly:${a.nearlyCount} Last:${a.lastUnlocked.slice(-2).join(',') || '-'} Toasts:${a.toasts} UI:${a.showAchievements?'OPEN':'CLOSED'}`, x, y);
+      y += lineHeight;
+      const statStr = Object.entries(a.stats).map(([k, v]) => `${k.replace(/_/g,'').substring(0,10)}:${v}`).join(' ');
+      ctx.fillText(`  STATS: ${statStr || '(none yet)'}`.substring(0, 140), x, y);
       y += lineHeight;
       ctx.fillStyle = '#ddd';
     }

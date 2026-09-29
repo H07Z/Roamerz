@@ -4,8 +4,8 @@
  * Supports future: farming, animals, weather, crafting, combat, dungeons, events, relationships, etc.
  */
 
-export const SAVE_VERSION = 21; // Phase 17 - Quest System
-export const SAVE_GAME_VERSION = '0.21.0';
+export const SAVE_VERSION = 22; // Phase 18.1 - Achievements System
+export const SAVE_GAME_VERSION = '0.22.0';
 export const MAX_SAVE_SLOTS = 5;
 export const STORAGE_KEY_PREFIX = 'roamerz_save_';
 export const STORAGE_META_KEY = 'roamerz_save_meta';
@@ -301,6 +301,18 @@ export interface QuestSaveData {
   version: number;
 }
 
+export interface AchievementSaveData {
+  achievements: Record<string, {
+    progress: number;
+    unlocked: boolean;
+    unlockedAt?: number;
+  }>;
+  stats: Record<string, number>;
+  uniques: Record<string, string[]>;
+  totalUnlocked: number;
+  version: number;
+}
+
 export interface MetaSaveData {
   playTimeSeconds: number;
   saveCount: number;
@@ -334,6 +346,7 @@ export interface SaveFile {
   world: WorldSaveData;
   npcs: Record<string, NPCSaveData>; // npcId -> data
   quests: QuestSaveData;
+  achievements?: AchievementSaveData; // Phase 18.1 (optional for backward compat, ensured by SaveManager)
 
   // Meta
   meta: MetaSaveData;
@@ -485,6 +498,16 @@ export function createDefaultQuestSaveData(): QuestSaveData {
   };
 }
 
+export function createDefaultAchievementSaveData(): AchievementSaveData {
+  return {
+    achievements: {},
+    stats: {},
+    uniques: {},
+    totalUnlocked: 0,
+    version: 1
+  };
+}
+
 export function createDefaultMetaSaveData(slotId: number): MetaSaveData {
   return {
     playTimeSeconds: 0,
@@ -517,6 +540,7 @@ export function createDefaultSaveFile(slotId: number = 0): SaveFile {
     world: createDefaultWorldSaveData(),
     npcs: {},
     quests: createDefaultQuestSaveData(),
+    achievements: createDefaultAchievementSaveData(),
     meta: createDefaultMetaSaveData(slotId),
     future: {},
     migrations: []

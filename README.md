@@ -25,10 +25,69 @@ PHASE 16.2 — Crafting System [COMPLETE]
 PHASE 16.3 — Cooking System [COMPLETE]
 PHASE 16.4 — Weather System [COMPLETE]
 PHASE 16.5 — Economy / Shop System [COMPLETE]
-PHASE 17 — Quest System [CURRENT]
+PHASE 17 — Quest System [COMPLETE]
+PHASE 18.1 — Achievements System [CURRENT]
+PHASE 18.2 — Experience & Leveling [PLANNED]
+PHASE 18.3 — Fishing System [PLANNED]
+PHASE 18.4 — NPC Reputation / Relationships [PLANNED]
 ```
 
-## Phase 17 - Quest System [CURRENT]
+## Phase 18.1 - Achievements System [CURRENT]
+
+### Objective
+Data-driven achievements that auto-unlock from tracked player stats, grant rewards, show an unlock toast, and persist (save v22). Small controlled phase built on the Phase 17 pattern: the AchievementSystem never reads other systems — `Game.ts` feeds it through `record*` hooks at the same places the quest hooks live, so modules stay independent.
+
+### Achievements System
+- **Achievement.ts**: `AchievementCategory` FARMING|ANIMALS|CRAFTING|COOKING|EXPLORATION|SOCIAL|ECONOMY|QUESTS|GENERAL, `AchievementStat` keys (crops_harvested, crops_planted, animal_produce_collected, animal_care, items_crafted, items_cooked, maps_visited*, npcs_talked*, dialogues, items_bought, items_sold, transactions, money_earned, quests_completed, max_money†, days_played†; *unique-set, †max), `AchievementDefinition {id,name,icon,description,category,stat,target,rewards?,hidden?,tier?}`, `AchievementInstance {definition,progress,unlocked,unlockedAt?}`, `AchievementSystemSaveData {achievements,stats,uniques,totalUnlocked,version}`.
+- **AchievementDatabase.ts** (singleton, 12 achievements, `validate()` checks ids/stats/targets/reward items exist in ItemDatabase):
+
+  | id | icon | name | category | unlock | rewards |
+  |---|---|---|---|---|---|
+  | ach_green_thumb | 🌱 | Green Thumb | FARMING | harvest 1 crop | $10 |
+  | ach_farmer | 🌾 | Farmer | FARMING | harvest 10 crops | $50 + 5 wheat_seed |
+  | ach_animal_friend | 🐔 | Animal Friend | ANIMALS | collect 5 animal produce | $25 + 3 hay |
+  | ach_caretaker | 💚 | Caretaker | ANIMALS | feed/pet 10 times | $20 |
+  | ach_apprentice_crafter | 🔨 | Apprentice Crafter | CRAFTING | craft 5 items | $30 + 5 wood |
+  | ach_home_cook | 🍳 | Home Cook | COOKING | cook 3 meals | $30 + 2 bread |
+  | ach_wanderer | 🗺️ | Wanderer | EXPLORATION | visit all 3 maps | $40 |
+  | ach_friendly_face | 💬 | Friendly Face | SOCIAL | talk to 3 different NPCs | $20 + 3 apple |
+  | ach_merchant | 💰 | Merchant | ECONOMY | 5 shop transactions | $50 |
+  | ach_quest_taker | 📜 | Quest Taker | QUESTS | complete 1 quest | $25 |
+  | ach_quest_master | 🏆 | Quest Master | QUESTS | complete 3 quests | $100 + 1 gem |
+  | ach_well_off | 💎 | Well Off | GENERAL | hold $500 at once | 20 coin |
+
+- **AchievementSystem.ts**: `initialize()`, stat hooks `recordStat(key, amount)` (counter), `recordUnique(key, id)` (set size), `recordMax(key, value)`; `update(player, totalSeconds)` re-checks locked achievements each frame (12, cheap) → unlock, grant money/items via `player.money` / `player.addItem`, `unlockedAt`, returns `{unlocked: ids}`; queries `getAll/getUnlocked/getLocked/getByCategory/getProgress(id){current,target,percent}/getNearlyComplete(50)/getCompletionPercent/getLastUnlockedIds`; `forceUnlock(id)` debug; `getSaveData/loadSaveData` (tolerates partial/corrupt/unknown ids, re-derives unique stats from sets, never re-grants rewards on load), `clear`, `getDebugString/debugPrint`.
+- **AchievementRenderer.ts**: 700x520 modal (gold accent) with overall progress bar, left list (icon, name, category, x/y, mini bar, ✅), right detail (tier 🥉🥈🥇, status + unlock time, description, progress bar, tracked stat, rewards, "N more to go"); category filter cycle; `pushUnlockToast()` queue rendered top-center (fade/slide, 4s each, "+N more"); `renderQuickHint()` top-right y=160 only when something is ≥50% ("nearly there").
+- **test_achievements.ts**: `npx tsx src/achievements/test_achievements.ts` — 36 checks: DB count/validation, counter/unique/max stats, unlock + money/item rewards, progress %, nearly-complete, two achievements on one stat unlock together, no double unlock, save/load roundtrip (no duplicate rewards), partial/null load tolerance, clear, forceUnlock → **ALL PASS**.
+
+### Save Extension Phase 18.1
+- **SaveTypes.ts**: `SAVE_VERSION 22`, `SAVE_GAME_VERSION 0.22.0`, `AchievementSaveData`, `SaveFile.achievements?` (top-level like quests), `createDefaultAchievementSaveData()`.
+- **SaveMigration.ts**: `case 22 → migrateToV22` adds an empty achievements block and preserves player/world/economy/weather/cooking/crafting/animals/farming/time/exploration/quests.
+- **SaveManager.ts**: `ensureDefaults` repairs missing/garbage achievements block (object-guarded), loads include defaults.
+- Verified: v21 slot → load → v22 with money/economy/weather/quests intact; v22 roundtrip keeps stats + unlocks.
+
+### Game Integration Phase 18.1
+- Fields/ctor/init: `achievementDatabase`, `achievementSystem`, `achievementRenderer`, `showAchievements`; init validates DB, records initial map.
+- Save: `collectSaveData` writes `achievements`; `applySaveData` loads it (or starts fresh for pre-v22 saves); `newGame` clears.
+- Hooks (next to the quest hooks): harvest → crops_harvested; plant → crops_planted; collect produce → animal_produce_collected; feed/pet → animal_care; craft/cook → items_crafted/items_cooked; buy/sell → items_bought/items_sold/transactions/money_earned; dialogue start → npcs_talked (unique) + dialogues; map switch/init/new game → maps_visited (unique); quest completion → quests_completed; each frame → max_money, days_played.
+- Update loop: `achievementSystem.update(player)` → toasts + console log; `achievementRenderer.update(dt)` ticks toasts.
+- Input `handleAchievementInput`: **Shift+T** open/close (T = trophies; A is WASD so Shift+A avoided), ESC close, W/S navigate, C cycle category, Enter details message. Opening blocked while dialogue/save/inventory/crafting/cooking/economy/quests are open; while open it blocks farming/animals/crafting/cooking/weather/economy/quests/inventory/dialogue/map transitions/auto-save/time/NPC updates/debug toggles (same treatment as the quest modal).
+- Render: modal in the modal chain, quick hint with the others, toasts drawn above everything (except debug/help).
+- Debug: `DebugManager` phase label `22 (18.1)`, gold `ACHIEVEMENTS:` line + `STATS:` line; **P** prints achievements; **T** runs Phase 7–18.1 tests (`runPhase18_1Tests` uses an isolated system so live state is untouched); **Ctrl+Shift+T** force-unlocks the first locked achievement to preview the toast.
+- Fixes made while wiring (small, same call sites): the bare **T** test key and the **Q** schedule-debug key now ignore Shift/Ctrl (previously Shift+Q closing the journal also toggled schedule debug); `player.update` is now blocked by every modal (crafting/cooking/economy/quests/achievements), so W/S in a modal no longer walks the player.
+
+### Tests (Phase 18.1)
+- `tsc --noEmit --skipLibCheck` → PASS
+- `npm run build` → 95 modules, PASS
+- `npx tsx src/achievements/test_achievements.ts` → 36/36 PASS
+- `npx tsx src/quests/test_quests.ts` → still 22 PASS / 0 FAIL
+- Save v21→v22 migration + roundtrip smoke → PASS
+
+### Controls (Phase 18.1)
+- **Shift+T** achievements UI, **W/S** navigate, **C** cycle category, **Enter** details, **ESC** close, **Ctrl+Shift+T** debug force-unlock
+
+
+## Phase 17 - Quest System [COMPLETE]
 
 ### Objective
 Data-driven QuestDefinition (id,name,icon,description,objectives,rewards,prerequisites), QuestDatabase 3 quests (collect, talk, explore), QuestSystem manages active/completed, objectives tracking (collect item, talk NPC, visit map, farming harvest, animal produce, craft, cook, buy, sell), persistence world.quests or top-level quests v21, QuestRenderer UI Shift+Q toggle (avoid WASD), Q/C cycle filter, W/S navigate, Enter start/complete, debug overlay, small controlled phase, preserve all previous (farming/animals/inventory/crafting/cooking/weather/economy).
@@ -104,7 +163,8 @@ npm run dev
   - Tracking: talk NPCs (E talk), visited maps (travel edges), harvested crops (farming E harvest), animal produce (E collect), crafted/cooked/bought/sold, inventory quantities
   - Quick hint top-right 135y shows active/available count
 - **Shift+P** test farm plots 6, **Shift+U** test animals 4, **Ctrl+Shift+K** toggle obstacle, **Ctrl+Shift+C** debug crafting
-- **P** print all including quests, **T** run all tests 7-17
+- **Shift+T** achievements UI (W/S navigate, C category, Enter details), **Ctrl+Shift+T** debug force-unlock
+- **P** print all including quests + achievements, **T** run all tests 7-18.1
 - **Ctrl+S/L** quick save/load Slot0, **Ctrl+Shift+S/L** Save/Load UI, **Ctrl+N** new game, Auto-save 60s + map transition
 - **Shift+R** reveal all, **Ctrl+R** reset exploration, **Shift+[ / ]** vision, **F1/F3/F4** jump maps
 - **Space** pause, =/+ faster, -/_ slower, ] +1h, [ -1h, \\ next phase, Shift+E clock
@@ -115,6 +175,12 @@ npm run dev
 
 ```
 src/
+├── achievements/
+│   ├── Achievement.ts - categories, stat keys, definitions, save types
+│   ├── AchievementDatabase.ts - 12 achievements, validation
+│   ├── AchievementSystem.ts - stat tracking (counter/unique/max), auto-unlock, rewards, persistence v22
+│   ├── AchievementRenderer.ts - Shift+T modal, category filter, unlock toasts, quick hint
+│   └── test_achievements.ts - tsx 36 checks
 ├── quests/
 │   ├── Quest.ts - QuestObjectiveType, QuestDefinition, QuestInstance, QuestSaveData
 │   ├── QuestDatabase.ts - 3 quests first_harvest/talk_to_elders/explorer, validation
@@ -128,14 +194,15 @@ src/
 ├── animals/ - 4 animals, feed/pet/produce/wander, 5 default spawn, minimap dots
 ├── farming/ - 4 crops, till/plant/water/harvest/wither, auto-watered by rain
 ├── inventory/ - 41 items, I UI
-├── save/ - SAVE_VERSION 21, quests top-level QuestSaveData, migrateToV21
+├── save/ - SAVE_VERSION 22, quests + achievements top-level, migrateToV22
 ├── exploration/ - fog, vision 8, minimap with animals
 ├── world/ - 3 maps, transitions
-├── core/Game.ts - + questSystem/renderer/database, Shift+Q modal UI, W/S nav, C/Q filter, Enter start, save/load quests v21, tracking hooks talked/visited/harvest/produce/craft/cook/buy/sell, updateObjectives auto-complete, P prints quests, T runs 7-17
+├── core/Game.ts - + achievementSystem/renderer/database, Shift+T modal, stat hooks, toasts; questSystem/renderer/database, Shift+Q modal UI, W/S nav, C/Q filter, Enter start, save/load quests v21, tracking hooks talked/visited/harvest/produce/craft/cook/buy/sell, updateObjectives auto-complete, P prints quests, T runs 7-17
 └── main.ts
 ```
 
 ### Previous Phases
+- Phase17: Quest System 3 quests, objectives tracking, rewards, prerequisites, Shift+Q journal, save v21, build 551kB
 - Phase16.5: Economy 3 shops, buy/sell, persistence v20, Shift+B UI, build 483.19kB
 - Phase16.4: Weather 6 weathers, tint+particles, auto-water farming, save v19, Shift+W/Ctrl+Shift+W, build 448.66kB
 - Phase16.3: Cooking 10 recipes, 8 new cooked foods, inventory 41, save v18, Shift+K UI, build 424.20kB, inventory fix sync renderer flags

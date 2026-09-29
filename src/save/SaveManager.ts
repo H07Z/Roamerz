@@ -16,6 +16,7 @@ import {
   createDefaultPlayerSaveData,
   createDefaultWorldSaveData,
   createDefaultQuestSaveData,
+  createDefaultAchievementSaveData,
   createDefaultMetaSaveData,
   PlayerSaveData,
   WorldSaveData,
@@ -385,6 +386,7 @@ export class SaveManager {
         },
         npcs: data.npcs ?? {},
         quests: { ...defaults.quests, ...(data.quests ?? {}) },
+        achievements: { ...defaults.achievements, ...(data.achievements ?? {}) },
         meta: { ...defaults.meta, ...(data.meta ?? {}) },
         future: { ...(data.future ?? {}) }
       };
@@ -462,6 +464,19 @@ export class SaveManager {
       totalStarted: (saveFile.quests as any)?.totalStarted ?? 0,
       totalCompleted: (saveFile.quests as any)?.totalCompleted ?? 0,
       totalFailed: (saveFile.quests as any)?.totalFailed ?? 0
+    };
+
+    // Ensure achievements (Phase 18.1)
+    const defaultAchievements = createDefaultAchievementSaveData();
+    const rawAchCandidate: any = saveFile.achievements;
+    const rawAch: any = (rawAchCandidate && typeof rawAchCandidate === 'object' && !Array.isArray(rawAchCandidate)) ? rawAchCandidate : {};
+    saveFile.achievements = {
+      ...defaultAchievements,
+      ...rawAch,
+      achievements: (rawAch.achievements && typeof rawAch.achievements === 'object') ? rawAch.achievements : {},
+      stats: (rawAch.stats && typeof rawAch.stats === 'object') ? rawAch.stats : {},
+      uniques: (rawAch.uniques && typeof rawAch.uniques === 'object') ? rawAch.uniques : {},
+      totalUnlocked: typeof rawAch.totalUnlocked === 'number' ? rawAch.totalUnlocked : 0
     };
 
     // Ensure meta

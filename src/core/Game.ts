@@ -81,6 +81,10 @@ import { EconomyRenderer } from '../economy/EconomyRenderer';
 import { QuestDatabase } from '../quests/QuestDatabase';
 import { QuestSystem } from '../quests/QuestSystem';
 import { QuestRenderer } from '../quests/QuestRenderer';
+import { AchievementDatabase } from '../achievements/AchievementDatabase';
+import { AchievementSystem } from '../achievements/AchievementSystem';
+import { AchievementRenderer } from '../achievements/AchievementRenderer';
+import { AchievementStat } from '../achievements/Achievement';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -176,6 +180,11 @@ export class Game {
   private questSystem: QuestSystem;
   private questRenderer: QuestRenderer;
   private showQuests: boolean = false;
+  // Phase 18.1 Achievements
+  private achievementDatabase: AchievementDatabase;
+  private achievementSystem: AchievementSystem;
+  private achievementRenderer: AchievementRenderer;
+  private showAchievements: boolean = false;
   private showQuestDebug: boolean = true;
 
   private isRunning: boolean = false;
@@ -267,6 +276,9 @@ export class Game {
     this.questDatabase = QuestDatabase.getInstance();
     this.questSystem = new QuestSystem(this.questDatabase);
     this.questRenderer = new QuestRenderer();
+    this.achievementDatabase = AchievementDatabase.getInstance();
+    this.achievementSystem = new AchievementSystem(this.achievementDatabase, this.itemDatabase);
+    this.achievementRenderer = new AchievementRenderer(this.itemDatabase);
 
     this.boundResizeHandler = this.handleResize.bind(this);
   }
@@ -353,6 +365,7 @@ export class Game {
           const tilePos = this.player.getTilePosition();
           this.explorationSystem.update(tilePos, map.mapId);
           this.questSystem.recordVisitedMap(map.mapId);
+          this.achievementSystem.recordUnique(AchievementStat.MAPS_VISITED, map.mapId);
           console.log(`[Game] Exploration initial: ${this.explorationSystem.getMapDebugString(map.mapId)}`);
         }
 
@@ -459,6 +472,18 @@ export class Game {
         console.log(`[Game] QuestSystem: ${this.questSystem.getDebugString()}`);
         this.questRenderer.setShowQuests(this.showQuests);
 
+        // Phase 18.1 Achievements System init
+        this.achievementSystem.initialize();
+        console.log(`[Game] AchievementDatabase: ${this.achievementDatabase.getCount()} achievements: ${this.achievementDatabase.getDebugString()}`);
+        const achievementValidation = this.achievementDatabase.validate(this.itemDatabase);
+        if (!achievementValidation.valid) {
+          console.warn('[Game] AchievementDatabase validation errors:', achievementValidation.errors);
+        } else {
+          console.log('[Game] AchievementDatabase validation PASS');
+        }
+        console.log(`[Game] AchievementSystem: ${this.achievementSystem.getDebugString()}`);
+        this.achievementRenderer.setShowAchievements(this.showAchievements);
+
         // Phase 16.1: Spawn default animals in village for visibility if none exist
         if (this.animalSystem.getAnimalCount() === 0) {
           const totalSec = this.timeManager.getTotalSeconds();
@@ -478,7 +503,8 @@ export class Game {
         console.log(`[Game] Phase 16.4: Weather System - data-driven weathers, transitions, visuals, farming auto-water, persistence`);
         console.log(`[Game] Phase 16.5: Economy / Shop System - data-driven shops, buy/sell, prices, transaction history, persistence`);
         console.log(`[Game] Phase 17: Quest System - data-driven quests, objectives, rewards, prerequisites, persistence`);
-        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, Shift+B economy/shop, Shift+Q quest journal, E till/plant/harvest/feed/collect/pet/talk, R water, Shift+F fog, Ctrl+S/L save/load`);
+        console.log(`[Game] Phase 18.1: Achievements System - data-driven achievements, stat tracking, auto-unlock, rewards, toasts, persistence`);
+        console.log(`[Game] Controls: I inventory, F farming overlay, Shift+G animals overlay, Shift+C crafting, Shift+K cooking, Shift+W weather overlay, Shift+B economy/shop, Shift+Q quest journal, Shift+T achievements (trophies), E till/plant/harvest/feed/collect/pet/talk, R water, Shift+F fog, Ctrl+S/L save/load`);
       }
     } catch (e) {
       console.error('[Game] Init failed:', e);
@@ -563,6 +589,7 @@ export class Game {
     const weatherSave = this.weatherSystem.getSaveData();
     const economySave = this.economySystem.getSaveData();
     const questSave = this.questSystem.getSaveData();
+    const achievementSave = this.achievementSystem.getSaveData();
 
     const allMapsInfo = this.world.getAllMapsInfo();
     const worldSave = {
@@ -627,6 +654,7 @@ export class Game {
       world: worldSave as any,
       npcs,
       quests: quests as any,
+      achievements: achievementSave as any,
       meta: meta as any,
       future: {},
       migrations: []
@@ -713,6 +741,16 @@ export class Game {
         this.questSystem.loadSaveData(saveFile.quests);
         console.log(`[Game] Quests loaded: ${this.questSystem.getDebugString()}`);
       }
+
+      if ((saveFile as any).achievements) {
+        this.achievementSystem.loadSaveData((saveFile as any).achievements);
+        console.log(`[Game] Achievements loaded: ${this.achievementSystem.getDebugString()}`);
+      } else {
+        // Pre-v22 save without achievements block: start fresh but keep current map as visited
+        this.achievementSystem.clear();
+        console.log('[Game] Achievements: no save block (pre-v22), starting fresh');
+      }
+      this.achievementSystem.recordUnique(AchievementStat.MAPS_VISITED, saveFile.world.playerMapId ?? targetMapId);
 
       this.worldFlags = saveFile.world.flags ?? {};
       this.openedLocations = new Set(saveFile.world.openedLocations ?? ['village_01']);
@@ -885,6 +923,7 @@ export class Game {
     this.weatherSystem.clear();
     this.economySystem.clear();
     this.questSystem.clear();
+    this.achievementSystem.clear();
     this.weatherSystem.initialize(this.timeManager.getTotalSeconds());
     // Spawn default animals for new game
     const totalSecNew = this.timeManager.getTotalSeconds();
@@ -919,6 +958,9 @@ export class Game {
     this.economyRenderer.setShowEconomy(false);
     this.showQuests = false;
     this.questRenderer.setShowQuests(false);
+    this.showAchievements = false;
+    this.achievementRenderer.setShowAchievements(false);
+    this.achievementSystem.recordUnique(AchievementStat.MAPS_VISITED, currentMapId);
 
     if (this.player) {
       const tilePos = this.player.getTilePosition();
@@ -942,7 +984,8 @@ export class Game {
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
     const isQuestOpen = this.showQuests;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen) return;
+    const isAchievementOpen = this.showAchievements;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen || isAchievementOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1005,6 +1048,7 @@ export class Game {
                 this.player.removeItem(seedId, 1);
                 console.log(`[Farming] Planted ${crop.id} using ${seedId} at ${plot.getX()},${plot.getY()}`);
                 this.saveRenderer.showMessage(`🌱 Planted ${crop.name} at ${plot.getX()},${plot.getY()}`, '#8f8', 2);
+                this.achievementSystem.recordStat(AchievementStat.CROPS_PLANTED, 1);
                 planted = true;
                 break;
               }
@@ -1028,6 +1072,8 @@ export class Game {
               }
               // Quest tracking
               this.questSystem.recordHarvestedCrop(result.cropId, result.yield);
+              // Achievement tracking (Phase 18.1)
+              this.achievementSystem.recordStat(AchievementStat.CROPS_HARVESTED, 1);
             }
           }
         } else if (state === PlotState.WITHERED) {
@@ -1105,7 +1151,8 @@ export class Game {
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
     const isQuestOpen = this.showQuests;
-    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen) return;
+    const isAchievementOpen = this.showAchievements;
+    if (isDialogueOpen || isSaveUIOpen || isInventoryOpen || isCraftingOpen || isCookingOpen || isEconomyOpen || isQuestOpen || isAchievementOpen) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -1159,6 +1206,7 @@ export class Game {
             this.saveRenderer.showMessage(`🐾 Collected ${result.quantity}x ${result.itemId} from ${animal.getType()}!`, '#ff8', 3);
             // Quest tracking
             this.questSystem.recordAnimalProduce(result.itemId, result.quantity);
+            this.achievementSystem.recordStat(AchievementStat.ANIMAL_PRODUCE_COLLECTED, result.quantity);
           } else {
             console.log(`[Animals] Collect failed chance for ${animal.getType()}`);
             this.saveRenderer.showMessage(`❌ ${animal.getType()} had no produce this time`, '#fa8', 2);
@@ -1176,6 +1224,7 @@ export class Game {
                 this.player.removeItem(feedId, 1);
                 console.log(`[Animals] Fed ${animal.getType()} with ${feedId}`);
                 this.saveRenderer.showMessage(`🍖 Fed ${def?.name ?? animal.getType()} with ${feedId} - Happy!`, '#8f8', 2);
+                this.achievementSystem.recordStat(AchievementStat.ANIMAL_CARE, 1);
                 fed = true;
                 break;
               }
@@ -1187,6 +1236,7 @@ export class Game {
             if (petted) {
               console.log(`[Animals] Petted ${animal.getType()}`);
               this.saveRenderer.showMessage(`💚 Petted ${animal.getDefinition()?.name ?? animal.getType()} - Happy!`, '#8af', 2);
+              this.achievementSystem.recordStat(AchievementStat.ANIMAL_CARE, 1);
             }
           }
         }
@@ -1201,7 +1251,7 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     const isEconomyOpen = this.showEconomy;
-    if (isEconomyOpen || this.showQuests) return;
+    if (isEconomyOpen || this.showQuests || this.showAchievements) return;
 
     if (this.showCrafting) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('c') && this.input.isKeyDown('shift'))) {
@@ -1276,6 +1326,7 @@ export class Game {
             console.log(`[Crafting] Crafted ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
             this.saveRenderer.showMessage(`🔨 Crafted ${result.resultQuantity}x ${result.resultItemId}!`, '#8f8', 2);
             this.questSystem.recordCrafted(result.resultItemId, result.resultQuantity ?? 1);
+            this.achievementSystem.recordStat(AchievementStat.ITEMS_CRAFTED, result.resultQuantity ?? 1);
           } else {
             console.log(`[Crafting] Craft failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Craft failed: ${result.reason}`, '#f88', 2);
@@ -1307,7 +1358,7 @@ export class Game {
   private handleCookingInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
-    if (this.showEconomy || this.showQuests) return;
+    if (this.showEconomy || this.showQuests || this.showAchievements) return;
 
     if (this.showCooking) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift'))) {
@@ -1397,6 +1448,7 @@ export class Game {
             console.log(`[Cooking] Cooked ${result.resultQuantity}x ${result.resultItemId} via ${recipe.id}`);
             this.saveRenderer.showMessage(`🍳 Cooked ${result.resultQuantity}x ${result.resultItemId}!`, '#ffb74d', 2);
             this.questSystem.recordCooked(result.resultItemId, result.resultQuantity ?? 1);
+            this.achievementSystem.recordStat(AchievementStat.ITEMS_COOKED, result.resultQuantity ?? 1);
           } else {
             console.log(`[Cooking] Cook failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Cook failed: ${result.reason}`, '#f88', 2);
@@ -1429,7 +1481,7 @@ export class Game {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
     // Don't block if inventory/crafting/cooking open? Allow toggle even when those open? For simplicity, allow only when no modal
-    if (isDialogueOpen || isSaveUIOpen || this.showEconomy || this.showQuests) return;
+    if (isDialogueOpen || isSaveUIOpen || this.showEconomy || this.showQuests || this.showAchievements) return;
 
     if (this.input.isKeyJustPressed('w') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
       this.showWeather = !this.showWeather;
@@ -1467,7 +1519,7 @@ export class Game {
   private handleEconomyInput(): void {
     const isDialogueOpen = this.dialogueManager.isOpen();
     const isSaveUIOpen = this.saveRenderer.isShowingUI();
-    if (this.showQuests) return;
+    if (this.showQuests || this.showAchievements) return;
 
     if (this.showEconomy) {
       if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('b') && this.input.isKeyDown('shift'))) {
@@ -1551,6 +1603,8 @@ export class Game {
             console.log(`[Economy] Bought ${qty}x ${itemId} from ${shop.id} for $${result.transaction?.totalPrice}`);
             this.saveRenderer.showMessage(`🛒 Bought ${qty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#ffd700', 2);
             this.questSystem.recordBought(itemId, qty);
+            this.achievementSystem.recordStat(AchievementStat.ITEMS_BOUGHT, qty);
+            this.achievementSystem.recordStat(AchievementStat.TRANSACTIONS, 1);
           } else {
             console.log(`[Economy] Buy failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Buy failed: ${result.reason}`, '#f88', 2);
@@ -1586,6 +1640,9 @@ export class Game {
             console.log(`[Economy] Sold ${sellQty}x ${itemId} to ${shop.id} for $${result.transaction?.totalPrice}`);
             this.saveRenderer.showMessage(`💰 Sold ${sellQty}x ${itemId} for $${result.transaction?.totalPrice}!`, '#8f8', 2);
             this.questSystem.recordSold(itemId, sellQty);
+            this.achievementSystem.recordStat(AchievementStat.ITEMS_SOLD, sellQty);
+            this.achievementSystem.recordStat(AchievementStat.TRANSACTIONS, 1);
+            this.achievementSystem.recordStat(AchievementStat.MONEY_EARNED, result.transaction?.totalPrice ?? 0);
           } else {
             console.log(`[Economy] Sell failed: ${result.reason}`);
             this.saveRenderer.showMessage(`❌ Sell failed: ${result.reason}`, '#f88', 2);
@@ -1686,7 +1743,7 @@ export class Game {
       return;
     }
 
-    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy) {
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showAchievements) {
       if (this.input.isKeyJustPressed('q') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
         this.showQuests = !this.showQuests;
         this.questRenderer.setShowQuests(this.showQuests);
@@ -1701,6 +1758,60 @@ export class Game {
     }
   }
 
+  // ==================== PHASE 18.1 ACHIEVEMENT INPUT ====================
+
+  private handleAchievementInput(): void {
+    const isDialogueOpen = this.dialogueManager.isOpen();
+    const isSaveUIOpen = this.saveRenderer.isShowingUI();
+
+    if (this.showAchievements) {
+      if (this.input.isKeyJustPressed('escape') || (this.input.isKeyJustPressed('t') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control'))) {
+        this.showAchievements = false;
+        this.achievementRenderer.setShowAchievements(false);
+        console.log('[Achievements] Closed achievements UI');
+        return;
+      }
+
+      const filteredCount = this.achievementRenderer.getFilteredAchievements(this.achievementSystem).length;
+      if (this.input.isKeyJustPressed('arrowup') || this.input.isKeyJustPressed('w')) {
+        this.achievementRenderer.navigate('up', filteredCount);
+      }
+      if (this.input.isKeyJustPressed('arrowdown') || this.input.isKeyJustPressed('s')) {
+        this.achievementRenderer.navigate('down', filteredCount);
+      }
+
+      if (this.input.isKeyJustPressed('c') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.achievementRenderer.cycleFilter();
+        console.log(`[Achievements] Filter: ${this.achievementRenderer.getFilterCategory() ?? 'ALL'}`);
+      }
+
+      if (this.input.isKeyJustPressed('enter')) {
+        const sel = this.achievementRenderer.getSelectedAchievement(this.achievementSystem);
+        if (sel) {
+          const p = this.achievementSystem.getProgress(sel.definition.id);
+          if (sel.unlocked) {
+            this.saveRenderer.showMessage(`✅ ${sel.definition.icon} ${sel.definition.name} - unlocked!`, '#8f8', 2);
+          } else {
+            this.saveRenderer.showMessage(`🔒 ${sel.definition.icon} ${sel.definition.name}: ${p?.current}/${p?.target} - ${sel.definition.description}`, '#fc6', 3);
+          }
+        }
+      }
+
+      return;
+    }
+
+    if (!isDialogueOpen && !isSaveUIOpen && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements) {
+      // Shift+T = Trophies (T alone runs tests; A is WASD so Shift+A is avoided)
+      if (this.input.isKeyJustPressed('t') && this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+        this.showAchievements = true;
+        this.achievementRenderer.setShowAchievements(true);
+        this.achievementRenderer.setSelectedIndex(0);
+        console.log('[Achievements] Opened achievements UI');
+        return;
+      }
+    }
+  }
+
   // ==================== PHASE 14 INVENTORY INPUT ==================== ==================== ====================
 
   private handleInventoryInput(): void {
@@ -1710,7 +1821,8 @@ export class Game {
     const isCookingOpen = this.showCooking;
     const isEconomyOpen = this.showEconomy;
     const isQuestOpen = this.showQuests;
-    if (isQuestOpen) return;
+    const isAchievementOpen = this.showAchievements;
+    if (isQuestOpen || isAchievementOpen) return;
 
     if (this.showPlayerInventory) {
       if (this.input.isKeyJustPressed('escape') || this.input.isKeyJustPressed('i')) {
@@ -1964,6 +2076,7 @@ export class Game {
     this.openedLocations.add(targetMapId);
     this.explorationSystem.recordMapTransition();
     this.questSystem.recordVisitedMap(targetMapId);
+    this.achievementSystem.recordUnique(AchievementStat.MAPS_VISITED, targetMapId);
     this.mapTransitionCooldown = 1.0;
 
     if (this.player) {
@@ -1988,7 +2101,7 @@ export class Game {
     if (this.showCrafting) return;
     if (this.showCooking) return;
     if (this.showEconomy) return;
-    if (this.showQuests) return;
+    if (this.showQuests || this.showAchievements) return;
 
     const map = this.world.getCurrentMap();
     if (!map) return;
@@ -2052,13 +2165,13 @@ export class Game {
 
     if (this.autoSaveTimer >= this.autoSaveInterval) {
       this.autoSaveTimer = 0;
-      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
+      if (!this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements) {
         console.log('[Save] Auto-save triggered');
         this.saveGame(AUTO_SAVE_SLOT);
       }
     }
 
-    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
+    if (this.timeManager && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements) {
       this.timeManager.update(deltaTime);
     }
 
@@ -2081,6 +2194,21 @@ export class Game {
           const qDef = this.questDatabase.getQuest(qId);
           this.saveRenderer.showMessage(`📜 Quest completed: ${qDef?.icon ?? ''} ${qDef?.name ?? qId}! +$${qDef?.rewards.money ?? 0}`, '#8f8', 4);
           console.log(`[Quests] Completed ${qId} rewards $${qDef?.rewards.money ?? 0}`);
+        }
+        this.achievementSystem.recordStat(AchievementStat.QUESTS_COMPLETED, result.completedQuests.length);
+      }
+    }
+
+    // Achievements update (Phase 18.1) - max stats + unlock check each frame (12 achievements, cheap)
+    if (this.achievementSystem && this.player && this.timeManager) {
+      this.achievementSystem.recordMax(AchievementStat.MAX_MONEY, this.player.money);
+      this.achievementSystem.recordMax(AchievementStat.DAYS_PLAYED, this.timeManager.getDay());
+      const achResult = this.achievementSystem.update(this.player, this.timeManager.getTotalSeconds());
+      for (const achId of achResult.unlocked) {
+        const inst = this.achievementSystem.getAchievement(achId);
+        if (inst) {
+          this.achievementRenderer.pushUnlockToast(inst);
+          console.log(`[Achievements] 🏆 Unlocked ${inst.definition.icon} ${inst.definition.name} (${this.achievementSystem.getUnlockedCount()}/${this.achievementSystem.getCount()})`);
         }
       }
     }
@@ -2126,7 +2254,8 @@ export class Game {
       const isDialogueOpen = this.dialogueManager.isOpen();
       const isSaveUIOpen = this.saveRenderer.isShowingUI();
       const isInventoryOpen = this.showPlayerInventory;
-      this.player.update(deltaTime, this.input, map, this.collisionSystem, isDialogueOpen || isSaveUIOpen || isInventoryOpen);
+      const isAnyModalOpen = isDialogueOpen || isSaveUIOpen || isInventoryOpen || this.showCrafting || this.showCooking || this.showEconomy || this.showQuests || this.showAchievements;
+      this.player.update(deltaTime, this.input, map, this.collisionSystem, isAnyModalOpen);
       this.playerRenderer.update(deltaTime, this.player);
       this.camera.follow(this.player.x, this.player.y);
       this.camera.update(deltaTime);
@@ -2175,12 +2304,13 @@ export class Game {
       const isCookingOpen = this.showCooking;
       const isEconomyOpen = this.showEconomy;
       const isQuestOpen = this.showQuests;
-      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen) {
+    const isAchievementOpen = this.showAchievements;
+      if (isVillage && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen && !isAchievementOpen) {
         this.npcManager.update(deltaTime, map, this.collisionSystem, currentMinutes);
       }
       this.npcRenderer.update(deltaTime, this.npcManager.getAllNPCs());
 
-      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen) {
+      if (isVillage && this.lifeManager && this.timeManager && !this.dialogueManager.isOpen() && !isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !isEconomyOpen && !isQuestOpen && !isAchievementOpen) {
         this.lifeManager.update(deltaTime, this.npcManager.getAllNPCs(), this.timeManager);
       }
 
@@ -2189,7 +2319,7 @@ export class Game {
       }
 
       const wasDialogueOpenBeforeInput = this.dialogueManager.isOpen();
-      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy && !this.showQuests) {
+      if (!isSaveUIOpen && !isInventoryOpen && !isCraftingOpen && !isCookingOpen && !this.showEconomy && !this.showQuests && !this.showAchievements) {
         this.handleDialogueInput();
       }
       (this as any)._wasDialogueOpenBeforeInput = wasDialogueOpenBeforeInput;
@@ -2200,11 +2330,13 @@ export class Game {
       this.handleWeatherInput();
       this.handleEconomyInput();
       this.handleQuestInput();
+      this.handleAchievementInput();
       this.handleFarmingInput();
       this.handleAnimalInput();
 
       this.handleSaveInput();
       this.saveRenderer.update(deltaTime);
+      this.achievementRenderer.update(deltaTime);
 
       this.debug.setNPCInfo({
         count: this.npcManager.getCount(),
@@ -2553,6 +2685,20 @@ export class Game {
           showQuests: this.showQuests
         });
       }
+
+      if (this.achievementSystem) {
+        this.debug.setAchievementInfo({
+          count: this.achievementSystem.getCount(),
+          unlockedCount: this.achievementSystem.getUnlockedCount(),
+          percent: this.achievementSystem.getCompletionPercent(),
+          nearlyCount: this.achievementSystem.getNearlyComplete(50).length,
+          lastUnlocked: this.achievementSystem.getLastUnlockedIds(),
+          stats: this.achievementSystem.getAllStats(),
+          debug: this.achievementSystem.getDebugString(),
+          showAchievements: this.showAchievements,
+          toasts: this.achievementRenderer.getToastCount()
+        });
+      }
     }
 
     this.debug.update(deltaTime, this.renderer.getWidth(), this.renderer.getHeight());
@@ -2629,6 +2775,9 @@ export class Game {
         }
         // Quest tracking: talked NPC
         this.questSystem.recordTalkedNPC(interactable.npc.id);
+        // Achievement tracking (Phase 18.1)
+        this.achievementSystem.recordUnique(AchievementStat.NPCS_TALKED, interactable.npc.id);
+        this.achievementSystem.recordStat(AchievementStat.DIALOGUES, 1);
         console.log(`[Interaction] Started dialogue with ${interactable.npc.id}`);
 
       } else if (interactable.type === 'BUILDING' && interactable.building) {
@@ -2662,7 +2811,7 @@ export class Game {
   private handleDebugToggles(_deltaTime: number, wasDialogueOpenBeforeInput?: boolean): void {
     const wasOpen = wasDialogueOpenBeforeInput ?? (this as any)._wasDialogueOpenBeforeInput ?? false;
 
-    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking || this.showEconomy || this.showQuests) return;
+    if (this.saveRenderer.isShowingUI() || this.showPlayerInventory || this.showCrafting || this.showCooking || this.showEconomy || this.showQuests || this.showAchievements) return;
 
     if (this.input.isKeyJustPressed('`') || this.input.isKeyJustPressed('f2')) {
       this.debug.setEnabled(!this.debug.isEnabled());
@@ -2746,7 +2895,7 @@ export class Game {
       console.log(`[Building] Front-of-door debug: ${this.showBuildingFronts ? 'ON' : 'OFF'}`);
     }
 
-    if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('q') && !this.input.isKeyDown('control')) {
+    if (!this.dialogueManager.isOpen() && this.input.isKeyJustPressed('q') && !this.input.isKeyDown('control') && !this.input.isKeyDown('shift')) {
       this.showSchedules = !this.showSchedules;
       console.log(`[Schedule] Schedules debug: ${this.showSchedules ? 'ON' : 'OFF'}`);
     }
@@ -2867,6 +3016,8 @@ export class Game {
       this.economySystem.debugPrint();
       console.log(`[Quests] ${this.questDatabase.getDebugString()} | ${this.questSystem.getDebugString()}`);
       this.questSystem.debugPrint();
+      console.log(`[Achievements] ${this.achievementDatabase.getDebugString()} | ${this.achievementSystem.getDebugString()}`);
+      this.achievementSystem.debugPrint();
       if (this.player) {
         console.log(`[Inventory Detailed] ${this.player.getInventoryDetailedString()}`);
         const tilePos = this.player.getTilePosition();
@@ -2894,8 +3045,22 @@ export class Game {
       console.log('[Exploration]:', this.explorationSystem.getAllMapsExploration());
     }
 
-    if (this.input.isKeyJustPressed('t')) {
-      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1+16.2+16.3 Test] Running all tests...');
+    if (this.input.isKeyJustPressed('t') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
+      // Debug: force-unlock first locked achievement to preview toast + rewards
+      const locked = this.achievementSystem.getLocked();
+      if (locked.length > 0 && this.player) {
+        const target = locked[0];
+        if (this.achievementSystem.forceUnlock(target.definition.id, this.player, this.timeManager.getTotalSeconds())) {
+          this.achievementRenderer.pushUnlockToast(target);
+          console.log(`[Achievements Debug] Force-unlocked ${target.definition.id}`);
+        }
+      } else {
+        console.log('[Achievements Debug] Nothing left to unlock');
+      }
+    }
+
+    if (this.input.isKeyJustPressed('t') && !this.input.isKeyDown('shift') && !this.input.isKeyDown('control')) {
+      console.log('[Phase7+8+9+10+11+12+13+14+15+16.1+16.2+16.3+16.4+16.5+17+18.1 Test] Running all tests...');
       this.runPhase7Tests();
       this.runPhase8Tests();
       this.runPhase9Tests();
@@ -2911,6 +3076,7 @@ export class Game {
       this.runPhase16_4Tests();
       this.runPhase16_5Tests();
       this.runPhase17Tests();
+      this.runPhase18_1Tests();
     }
 
     if (this.input.isKeyJustPressed('k') && this.input.isKeyDown('shift') && this.input.isKeyDown('control')) {
@@ -3913,6 +4079,40 @@ export class Game {
     console.log(`[Quests] ${this.questSystem.getDebugString()}`);
   }
 
+  private runPhase18_1Tests(): void {
+    console.log('=== PHASE 18.1 TESTS - ACHIEVEMENTS SYSTEM ===');
+    // Runs on an isolated system so the live game state is untouched
+    const sys = new AchievementSystem(this.achievementDatabase, this.itemDatabase);
+    sys.initialize();
+    const count = this.achievementDatabase.getCount();
+    console.log(`Test1 AchievementDatabase count: ${count} (expected 12) -> ${count===12 ? 'PASS' : 'FAIL'}`);
+    const validation = this.achievementDatabase.validate(this.itemDatabase);
+    console.log(`Test2 validation: valid=${validation.valid} errors=${validation.errors.length} -> ${validation.valid ? 'PASS' : 'FAIL'}`);
+    if (validation.errors.length) console.log(`  Errors: ${validation.errors.join(', ')}`);
+    const fakeInv = new Inventory(20, this.itemDatabase);
+    const fakePlayer = { money: 0, addItem: (id: string, q: number) => fakeInv.addItem(id, q) };
+    sys.recordStat(AchievementStat.CROPS_HARVESTED, 1);
+    let r = sys.update(fakePlayer, 100);
+    console.log(`Test3 harvest 1 -> green_thumb: ${r.unlocked.join(',')} money ${fakePlayer.money} -> ${r.unlocked.includes('ach_green_thumb') && fakePlayer.money===10 ? 'PASS' : 'FAIL'}`);
+    sys.recordUnique(AchievementStat.NPCS_TALKED, 'NPC001');
+    sys.recordUnique(AchievementStat.NPCS_TALKED, 'NPC001');
+    sys.recordUnique(AchievementStat.NPCS_TALKED, 'NPC002');
+    sys.recordUnique(AchievementStat.NPCS_TALKED, 'NPC003');
+    r = sys.update(fakePlayer, 200);
+    console.log(`Test4 unique npcs 3 -> friendly_face: ${r.unlocked.join(',')} apple ${fakeInv.getItemQuantity('apple')} -> ${r.unlocked.includes('ach_friendly_face') && fakeInv.getItemQuantity('apple')===3 ? 'PASS' : 'FAIL'}`);
+    sys.recordMax(AchievementStat.MAX_MONEY, 500);
+    sys.recordMax(AchievementStat.MAX_MONEY, 10);
+    r = sys.update(fakePlayer, 300);
+    console.log(`Test5 max_money 500 -> well_off: ${r.unlocked.join(',')} stat ${sys.getStat(AchievementStat.MAX_MONEY)} -> ${r.unlocked.includes('ach_well_off') && sys.getStat(AchievementStat.MAX_MONEY)===500 ? 'PASS' : 'FAIL'}`);
+    const save = sys.getSaveData();
+    const sys2 = new AchievementSystem(this.achievementDatabase, this.itemDatabase);
+    sys2.loadSaveData(JSON.parse(JSON.stringify(save)));
+    const r2 = sys2.update(fakePlayer, 400);
+    console.log(`Test6 save/load: unlocked ${sys2.getUnlockedCount()} expected 3, re-unlock ${r2.unlocked.length} expected 0 -> ${sys2.getUnlockedCount()===3 && r2.unlocked.length===0 ? 'PASS' : 'FAIL'}`);
+    console.log(`Test7 live system untouched: ${this.achievementSystem.getDebugString()}`);
+    console.log('=== END PHASE 18.1 TESTS ===');
+  }
+
   private render(): void {
     this.renderer.clear();
     const ctx = this.renderer.getContext();
@@ -4003,7 +4203,7 @@ export class Game {
       this.minimapRenderer.renderFullMap(ctx, map, this.explorationSystem, w, h);
     }
 
-    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
+    if (this.showInteractionPrompt && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements) {
       this.dialogueRenderer.renderInteractionPrompt(ctx, this.interactionSystem, w, h);
     }
 
@@ -4023,16 +4223,22 @@ export class Game {
       this.economyRenderer.render(ctx, w, h, this.economySystem, this.player.getInventory(), this.player.money);
     } else if (this.showQuests && this.player) {
       this.questRenderer.render(ctx, w, h, this.questSystem, this.player.getInventory(), this.player.money);
+    } else if (this.showAchievements && this.player) {
+      this.achievementRenderer.render(ctx, w, h, this.achievementSystem, this.player.money);
     } else if (!this.showPlayerInventory && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.player) {
       // Quick hints
       this.craftingRenderer.renderQuickHint(ctx, w, h, this.craftingSystem, this.player.getInventory());
       this.cookingRenderer.renderQuickHint(ctx, w, h, this.cookingSystem, this.player.getInventory());
       this.economyRenderer.renderQuickHint(ctx, w, h, this.economySystem, this.player.money);
       this.questRenderer.renderQuickHint(ctx, w, h, this.questSystem);
+      this.achievementRenderer.renderQuickHint(ctx, w, h, this.achievementSystem);
     }
 
+    // Achievement unlock toasts - drawn above modals so they are never missed
+    this.achievementRenderer.renderToasts(ctx, w, h);
+
     // Farming selected plot info (when not in inventory)
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedFarmPlotId) {
       const plot = (this.farmingSystem as any).plots.get(this.selectedFarmPlotId) as FarmPlot | undefined;
       if (plot) {
         this.farmingRenderer.renderPlotInfo(ctx, plot, w, h);
@@ -4040,7 +4246,7 @@ export class Game {
     }
 
     // Animals selected info
-    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
+    if (!this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements && !this.dialogueManager.isOpen() && !this.saveRenderer.isShowingUI() && this.selectedAnimalId) {
       const animal = this.animalSystem.getAnimal(this.selectedAnimalId);
       if (animal) {
         this.animalRenderer.renderAnimalInfo(ctx, animal, w, h);
@@ -4057,7 +4263,7 @@ export class Game {
       this.renderHelp(ctx, w, h);
     }
 
-    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests) {
+    if (map && this.player && this.mapTransitionCooldown <= 0 && !this.saveRenderer.isShowingUI() && !this.showPlayerInventory && !this.showCrafting && !this.showCooking && !this.showEconomy && !this.showQuests && !this.showAchievements) {
       const tilePos = this.player.getTilePosition();
       if (tilePos.x <= 0 || tilePos.x >= map.width - 1 || tilePos.y <= 0 || tilePos.y >= map.height - 1) {
         ctx.save();
@@ -4208,7 +4414,14 @@ export class Game {
       '  3 quests: first_harvest 🌾 (collect wheat_seed 3, harvest wheat 1, have wheat 3), talk_to_elders 💬 (talk NPC001/002, visit village), explorer 🗺️ (visit all 3 maps, collect wood 10) requires talk_to_elders',
       '  Tracking: talk NPCs, visited maps, harvested crops, crafted/cooked/bought/sold, inventory',
       '  Persistence v21, quick hint top-right shows active/available',
-      '  P - Print all including quests, T - Run all tests 7-17',
+      '  P - Print all including quests, T - Run all tests 7-18.1',
+      'Achievements System (Phase 18.1):',
+      '  Shift+T - Toggle achievements UI (T for trophies; A is WASD so avoided)',
+      '  W/S - Navigate, C cycle category ALL→FARMING→ANIMALS→CRAFTING→COOKING→EXPLORATION→SOCIAL→ECONOMY→QUESTS→GENERAL, Enter details',
+      '  12 achievements auto-unlock from tracked stats: harvest, plant, produce, feed/pet, craft, cook, maps, NPCs, transactions, quests, max money',
+      '  Rewards (money + items) granted on unlock, toast top-center, quick hint top-right when ≥50% progress',
+      '  Ctrl+Shift+T - Debug: force-unlock first locked achievement (preview toast)',
+      '  Persistence v22 (top-level achievements block), stats survive save/load',
       'General: G grid, B coords, ` F2 debug, H help, R reset (no mod)',
       '',
       `Player: ${this.player ? `${Math.floor(this.player.x)},${Math.floor(this.player.y)} Tile ${this.player.getTilePosition().x},${this.player.getTilePosition().y} Map ${this.playerMapId} ${this.player.state} HP:${this.player.health} $${this.player.money} Inv:${this.player.getInventory().getUsedSlots()}/${this.player.getInventory().getCapacity()}` : 'N/A'}`,
@@ -4333,5 +4546,9 @@ export class Game {
   isWeatherShowing(): boolean { return this.showWeather; }
   isEconomyShowing(): boolean { return this.showEconomy; }
   isQuestsShowing(): boolean { return this.showQuests; }
+  getAchievementDatabase(): AchievementDatabase { return this.achievementDatabase; }
+  getAchievementSystem(): AchievementSystem { return this.achievementSystem; }
+  getAchievementRenderer(): AchievementRenderer { return this.achievementRenderer; }
+  isAchievementsShowing(): boolean { return this.showAchievements; }
   isGameRunning(): boolean { return this.isRunning; }
 }
